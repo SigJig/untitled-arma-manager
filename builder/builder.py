@@ -4,6 +4,7 @@ import shutil
 from typing import Type
 from pathlib import Path
 from joiner import Joiner
+from hashing import hash_dir
 
 # Possibly a user-defined class that sets instructions on how to compile the source files?
 # Option to pass custom packager (for example if you wanted to use a different PBO packer or ObfuSQF)
@@ -65,3 +66,5 @@ class Builder:
             shutil.rmtree(self.out_dir)
         
         self._join_sources()
+
+        return hash_dir(self.out_dir)
