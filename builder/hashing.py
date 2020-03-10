@@ -2,8 +2,9 @@
 import os
 import hashlib
 from pathlib import Path
+from typing import Any
 
-def hash_file(file: Path, buf_size=16 * 1024):
+def hash_file(file: Path, buf_size=16 * 1024) -> Any:
     hsh = hashlib.sha1()
 
     try:
@@ -18,7 +19,7 @@ def hash_file(file: Path, buf_size=16 * 1024):
 
     return hsh
 
-def hash_dir(directory: Path):
+def hash_dir(directory: Path) -> Any:
     hsh = hashlib.sha1()
 
     if not directory.exists(): return hsh

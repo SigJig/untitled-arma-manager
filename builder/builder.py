@@ -1,7 +1,10 @@
 
 import os
 import shutil
-from typing import Type
+from typing import (
+    Type,
+    Any
+)
 from pathlib import Path
 from joiner import Joiner
 from hashing import hash_dir
@@ -61,7 +64,7 @@ class Builder:
             else:
                 shutil.copy(src, dst)
 
-    def build(self):
+    def build(self) -> Any:
         if self.out_dir.exists():
             shutil.rmtree(self.out_dir)
         
