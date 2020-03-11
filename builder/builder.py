@@ -1,14 +1,16 @@
 
 import os
-import shutil
 import abc
+import json
+import shutil
 from typing import (
     Type,
-    Any
+    Any,
+    List,
+    Union
 )
-from pathlib import Path
+from pathlib import Path, PurePath
 from pboutil import PBOFile
-from joiner import Joiner
 from hashing import hash_dir, hash_file
 
 class Binarizer(abc.ABC):
@@ -36,35 +38,113 @@ class PBOPacker(Binarizer):
 
         return self.out_path
 
+BINARIZERS = {
+    'pbopacker': PBOPacker
+}
+
+class BuilderOptions:
+    _default_output = {
+        'binarizer': PBOPacker,
+        'should_binarize': True,
+        'tmp_dir': 'tmp',
+        'missions_dir': 'missions'
+    }
+
+    def __init__(self, **opts) -> None:
+        self.opts = opts
+        self.output = {
+            **self._default_output,
+            **opts.get('output', {})
+        }
+
+        if not 'source_dir' in self.opts:
+            raise Exception('Missing source_dir')
+
+        self.source_dir = self.opts['source_dir']
+        self._paths = opts.get('paths', [])
+
+        if self.output.get('should_binarize'):
+            if bnzr := self.output.get('binarizer', ''):
+                try:
+                    if not isinstance(bnzr, Binarizer) and not issubclass(bnzr, Binarizer):
+                        print(type(bnzr))
+                        bnzr = BINARIZERS[bnzr]
+                    
+                    self.output['binarizer'] = bnzr
+                except KeyError:
+                    raise Exception(f'Invalid binarizer {bnzr}')
+            else:
+                raise Exception('Invalid binarizer')
+
+    def _process_pure_path(self, path: Union[PurePath, List[str], str]):
+        if isinstance(path, PurePath): return path
+
+        if isinstance(path, list):
+            return PurePath(*path)
+
+        return PurePath(path)
+
+    def _process_path(self, path: Union[PurePath, List[str], str]):
+        pure = self._process_pure_path(path)
+
+        # TODO: If the pure path is relative, it should join with the source_dir
+        return self.source_dir.joinpath(pure)
+
+    @property
+    def should_binarize(self) -> bool:
+        return self.output['should_binarize']
+
+    @property
+    def binarizer(self) -> Binarizer:
+        return self.output['binarizer']
+
+    @property
+    def tmp_dir(self) -> Path:
+        return self._process_path(self.output['tmp_dir'])
+
+    @property
+    def missions_dir(self) -> Path:
+        return self._process_path(self.output['missions_dir'])
+
+    @property
+    def paths(self) -> List[Any]:
+        if not self._paths: return []
+
+        for p in self._paths:
+            src, dst = self._process_pure_path(p[0]), self._process_pure_path(p[1]) if len(p) > 1 else None
+
+            yield src, dst
+
+    @classmethod
+    def from_json(cls, file: Path) -> Any:
+        with open(file) as fp:
+            return cls(**json.load(fp))
+
 # Possibly a user-defined class that sets instructions on how to compile the source files?
 # Option to pass custom packager (for example if you wanted to use a different PBO packer or ObfuSQF)
 class Builder:
     def __init__(self, 
-            source_dir: Path,
-            out_dir: Path,
-            missions_dir: Path,
-            joiner: Type[Joiner],
-            binarizer: Type[Binarizer] = None,
-            should_binarize: bool = False
+            opts: Union[dict, BuilderOptions]
         ) -> None:
 
-        self.source_dir = source_dir
-        self.out_dir = out_dir
+        if not isinstance(opts, BuilderOptions):
+            opts = BuilderOptions(**opts)
+
+        self.opts = opts
+        
         self._out_file = None
-        self.missions_dir = missions_dir
-        self.joiner = joiner
-
-        if binarizer is None and should_binarize:
-            raise Exception('Binarize option is set to true, however no binarizer was passed')
-
-        self.binarizer = binarizer
-        self.should_binarize = should_binarize
         self.built_hash = None
+
+    def __del__(self):
+        """
+        if self.opts and self.opts.tmp_dir.exists():
+            shutil.rmtree(self.opts.tmp_dir)
+        """
 
     @property
     def out_file(self) -> Path:
         if self._out_file is None:
-            if not self.should_binarize:
+            if not self.opts.should_binarize:
                 raise Exception(repr(self) + ''' 
                     Attempted to access binarized output file, however this instance does not support binarization
                 ''')
@@ -92,15 +172,24 @@ class Builder:
                 shutil.copy(src_joined, dst_joined)
 
     def _join_sources(self) -> None:
-        self._verify_dir(self.out_dir)
+        self._verify_dir(self.opts.tmp_dir)
 
-        joiner = self.joiner()
-
-        for path in joiner.paths:
+        for src_pure, dst_pure in self.opts.paths:
 
             # pylint: disable=unsubscriptable-object
-            src = self.source_dir.joinpath(path[0])
-            dst = self.out_dir.joinpath(path[1] if len(path) > 1 else src)
+            src = self.opts.source_dir.joinpath(src_pure)
+
+            if src.is_file():
+                dst = self.opts.tmp_dir.joinpath(
+                    dst_pure
+                        if dst_pure is not None
+                        else 
+                    src.name
+                )
+            elif dst_pure is not None:
+                dst = self.opts.tmp_dir.joinpath(dst_pure)
+            else:
+                dst = self.opts.tmp_dir
 
             if src.is_dir():
                 if dst.exists():
@@ -114,7 +203,7 @@ class Builder:
                 shutil.copy(src, dst)
 
     def _binarize(self) -> None:
-        binarizer = self.binarizer(self.out_dir, self.missions_dir)
+        binarizer = self.opts.binarizer(self.opts.tmp_dir, self.opts.missions_dir)
 
         return binarizer.binarize()
 
@@ -123,19 +212,19 @@ class Builder:
 
     def build(self) -> Any:
         if self.built_hash is None:
-            if self.out_dir.exists():
-                shutil.rmtree(self.out_dir)
+            if self.opts.tmp_dir.exists():
+                shutil.rmtree(self.opts.tmp_dir)
 
             self._join_sources()
 
-            if self.should_binarize:
+            if self.opts.should_binarize:
                 binarized = self._binarize()
 
                 self.built_hash = hash_file(binarized)
             else:
-                if self.out_dir.is_file():
+                if self.opts.out_dir.is_file():
                     raise TypeError(f'Output directory is a file')
 
-                self.built_hash = hash_dir(self.out_dir)
+                self.built_hash = hash_dir(self.opts.tmp_dir)
 
         return self.built_hash
