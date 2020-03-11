@@ -1,7 +1,7 @@
 
 import os
 from pathlib import Path, PurePath
-from builder import Builder
+from builder import Builder, PBOPacker
 from joiner import Joiner
 
 TEST_DIR = Path.home().joinpath('Documents', 'development', 'clones', 'phoenixrp-altislife')
@@ -19,15 +19,13 @@ if __name__ == '__main__':
         def paths(self):
             return [ (PurePath('Framework', 'Client Side'), PurePath()), (PurePath('PhoenixRP.Altis'), PurePath()) ]
 
-    class LifeJoiner(Joiner):
-        @property
-        def paths(self):
-            return [ (PurePath('Framework', 'Server Side'), PurePath()) ]
+    b = Builder(source_dir=MISSION_LOCATION,
+                out_dir=MISSION_BIN,
+                missions_dir=MISSIONS_DIR,
+                joiner=PHXJoiner,
+                binarizer=PBOPacker,
+                should_binarize=True)
 
-    from hashing import hash_dir
-
-    b = Builder(source_dir=MISSION_LOCATION, out_dir=MISSION_BIN, missions_dir=TEST_DIR, joiner=PHXJoiner)
     hsh = b.build()
 
-    a, b = hsh.hexdigest(), hash_dir(TEST_DIR.joinpath('googo')).hexdigest()
-    print(a, b, a == b)
+    print(hsh.hexdigest())
