@@ -87,7 +87,9 @@ class BuilderOptions:
     def _process_path(self, path: Union[PurePath, List[str], str]):
         pure = self._process_pure_path(path)
 
-        # TODO: If the pure path is relative, it should join with the source_dir
+        if pure.is_absolute():
+            return Path(pure)
+
         return self.source_dir.joinpath(pure)
 
     @property
