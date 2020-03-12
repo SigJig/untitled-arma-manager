@@ -60,7 +60,7 @@ class BuilderOptions:
         if not 'source_dir' in self.opts:
             raise Exception('Missing source_dir')
 
-        self.source_dir = self.opts['source_dir']
+        self.source_dir = self._process_path(self.opts['source_dir'])
         self._paths = opts.get('paths', [])
 
         if self.output.get('should_binarize'):
@@ -118,9 +118,16 @@ class BuilderOptions:
             yield src, dst
 
     @classmethod
-    def from_json(cls, file: Path) -> Any:
-        with open(file) as fp:
-            return cls(**json.load(fp))
+    def from_json(cls, json_: Union[str, Path], is_file: bool = True) -> Any:
+        data = {}
+
+        if is_file:
+            with open(json_) as fp:
+                data = json.load(fp)
+        else:
+            data = json.loads(json_)
+
+        return cls(**data)
 
 # Possibly a user-defined class that sets instructions on how to compile the source files?
 # Option to pass custom packager (for example if you wanted to use a different PBO packer or ObfuSQF)

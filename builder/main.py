@@ -1,32 +1,21 @@
 
 import os
 from pathlib import Path, PurePath
-from builder import Builder, PBOPacker
+from builder import Builder, BuilderOptions, PBOPacker
 
-TEST_DIR = Path.home().joinpath('Documents', 'development', 'clones', 'phoenixrp-altislife')
-
-"""{
-    "source_dir": [""],
+json_ = """
+{
+    "source_dir": "/home/sig/Documents/development/clones/phoenixrp-altislife",
     "paths": [
         [["Framework", "Client Side"]],
         ["PhoenixRP.Altis"]
-    ],
-    "output": {
-        "binarize": true,
-        "binarizer": "pbopacker",
-        "tmp_dir": "",
-        "missions_dir": ""
-    }
-}"""
+    ]
+}
+"""
 
 if __name__ == '__main__':
-    b = Builder({
-        'source_dir': TEST_DIR,
-        'paths': [
-            [["Framework", "Client Side"]],
-            ["PhoenixRP.Altis"]
-        ]
-    })
+    opts = BuilderOptions.from_json(json_, False)
+    b = Builder(opts)
 
     hsh = b.build()
 
