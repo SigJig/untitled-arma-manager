@@ -4,7 +4,7 @@ import hashlib
 from pathlib import Path
 from typing import Any
 
-def hash_file(file: Path, buf_size=16 * 1024) -> Any:
+def hash_file(file: Path, buf_size: int = 16 * 1024) -> Any:
     hsh = hashlib.sha1()
 
     try:

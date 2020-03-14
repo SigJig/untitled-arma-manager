@@ -10,7 +10,9 @@ from pathlib import (
 from typing import (
     Sequence,
     Union,
-    Type
+    Type,
+    Tuple,
+    List
 )
 
 class SteamCMD:
@@ -20,8 +22,11 @@ class SteamCMD:
         'linux': 'steamcmd_linux.tar.gz'
     }
     stream_chunk_size = 8 * 1024
+    default_install_dir = Path.home().joinpath('steamcmd')
 
-    def __init__(self, path: Path) -> SteamCMD:
+    def __init__(self, path: Path = None) -> SteamCMD:
+        path = path or type(self).default_install_dir
+
         if path.is_dir():
             self.path = path.joinpath('steamcmd.sh' if platform.system() == 'Linux' else 'steamcmd.exe')
         else:
@@ -30,15 +35,26 @@ class SteamCMD:
         self.args = []
 
     def run(self):
-        subprocess.check_call(self.subprocess_callable)
+        callable_ = self.subprocess_callable
+        print(callable_)
+
+        subprocess.check_call(callable_)
 
     def add(self, *commands: Sequence[Union[str, list]]) -> SteamCMD:
-        for command in self._construct(*commands):
-            self.args.append(command)
+        for command in commands:
+            if isinstance(command, list):
+                if len(command) > 1:
+                    key, args = command[0], command[1:]
+
+                    self.args.append([self._format_arg(key)] + args if isinstance(args, list) else [args])
+                else:
+                    command = command[0]
+            else:
+                self.args.append([self._format_arg(command)])
 
         return self
 
-    def login(self, username, password, code=None) -> SteamCMD:
+    def login(self, username: str, password: str, code: Union[str, None] = None) -> SteamCMD:
         cmd_arr = ['login', username, password]
         
         if code is not None:
@@ -51,22 +67,10 @@ class SteamCMD:
         res = [self.path]
         res += ['"{}"'.format(' '.join(x)) for x in self.args]
 
-        return res + [self._format_cmd('quit')]
+        return res + [self._format_arg('quit')]
 
-    def _construct(self, *commands: Sequence[Union[str, list]]) -> None:
-        for command in commands:
-            if isinstance(command, list):
-                if len(command) > 1:
-                    key, args = command[0], command[1:]
-
-                    yield [self._format_cmd(key)] + args if isinstance(args, list) else [args]
-                else:
-                    command = command[0]
-            else:
-                yield [self._format_cmd(command)]
-
-    def _format_cmd(self, command: str) -> str:
-        return '+' + command
+    def _format_arg(self, arg: str) -> str:
+        return '+' + arg
 
     @classmethod
     def is_installed(cls, path: Path) -> bool:
@@ -113,12 +117,62 @@ class SteamCMD:
 class ArmaClient:
     steam_game_id = 233780
 
+    def __init__(self, **opts):
+        self._opts = opts
+        self.path = self._opts.pop('path')
+        self.cli_args = []
+
+        self.add_arg(*self._opts.items())
+
+    def run(self):
+        subprocess.check_call(self.subprocess_callable)
+
+    def add_arg(self, *args: Sequence[Union[str, Tuple[str, str]]]):
+        self.cli_args.extend(args)
+
+        return self
+
+    @property
+    def subprocess_callable(self) -> Sequence[str]:
+        return [self._opts.get('path')] + [
+            self._format_arg(*x) if type(x) in [list, tuple] else self._format_arg(x) for x in self.cli_args
+        ]
+
+    def _format_arg(self, name: str, value: Union[str, None] = None) -> str:
+        name = '-' + name
+
+        if value is not None:
+            return name + '=' + str(value)
+
+        return name
+
     @classmethod
-    def install(cls, validate: bool = True) -> ArmaClient:
-        pass
+    def install(cls, validate: bool = True, path: Path = None) -> Type[ArmaClient]:
+        cmd_arr = ['app_update', cls.steam_game_id]
+
+        if validate:
+            cmd_arr.append('validate')
+
+        steamcmd = SteamCMD().add(cmd_arr)
+
+        if path is not None:
+            if path.exists():
+                if not path.is_dir():
+                    raise FileExistsError(path)
+                elif os.listdir(path):
+                    raise Exception(f'Directory "{path}" is not empty')
+
+            steamcmd.add(['force_install_dir', os.fspath(path.absolute())])
+
+        steamcmd.run()
+
+        return cls
 
 if __name__ == '__main__':
     import os
+    import sys
+
+    args = sys.argv[1:]
 
     install_path = Path('/opt', 'steamcmd')
     print(os.fspath(install_path))
@@ -128,6 +182,5 @@ if __name__ == '__main__':
     SteamCMD.install(install_path)
     
     s = SteamCMD(install_path)
-    s.login('user', 'password')
+    s.login(*args) # pylint: disable=no-value-for-parameter
     s.run()
-
