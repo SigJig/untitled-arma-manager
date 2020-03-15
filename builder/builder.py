@@ -17,10 +17,10 @@ class Binarizer(abc.ABC):
     def __init__(self, path: Path, out_path: Path) -> None:
         self.path = path
         
-        if not out_path.is_file():
-            self.out_path = out_path.joinpath(path.name + '.pbo')
-        else:
-            self.out_path = out_path
+        """ if not out_path.is_file():
+            raise Exception(f'Output {out_path} is not a file')
+         """
+        self.out_path = out_path
 
         parent = self.out_path.parents[0]
         if not parent.exists():
@@ -47,7 +47,8 @@ class BuilderOptions:
         'binarizer': PBOPacker,
         'should_binarize': True,
         'tmp_dir': 'tmp',
-        'missions_dir': 'missions'
+        'missions_dir': 'missions',
+        'filename': 'mission'
     }
 
     def __init__(self, **opts) -> None:
@@ -91,6 +92,13 @@ class BuilderOptions:
             return Path(pure)
 
         return self.source_dir.joinpath(pure)
+
+    @property
+    def filename(self) -> str:
+        try:
+            return self.output['filename'] + '.pbo'
+        except KeyError:
+            raise Exception('Filename is not present')
 
     @property
     def should_binarize(self) -> bool:
@@ -212,7 +220,7 @@ class Builder:
                 shutil.copy(src, dst)
 
     def _binarize(self) -> None:
-        binarizer = self.opts.binarizer(self.opts.tmp_dir, self.opts.missions_dir)
+        binarizer = self.opts.binarizer(self.opts.tmp_dir, self.opts.missions_dir.joinpath(self.opts.filename))
 
         return binarizer.binarize()
 

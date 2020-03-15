@@ -36,7 +36,6 @@ class SteamCMD:
 
     def run(self):
         callable_ = self.subprocess_callable
-        print(callable_)
 
         subprocess.check_call(callable_)
 
@@ -65,7 +64,7 @@ class SteamCMD:
     @property
     def subprocess_callable(self) -> Sequence[str]:
         res = [self.path]
-        res += ['"{}"'.format(' '.join(x)) for x in self.args]
+        res += ['{}'.format(' '.join(x)) for x in self.args]
 
         return res + [self._format_arg('quit')]
 
@@ -77,8 +76,10 @@ class SteamCMD:
         return path.exists() and bool(os.listdir(path))
 
     @classmethod
-    def install(cls, path: Path, delete_tmp_file: bool = True) -> Type[SteamCMD]:
-        if cls.is_installed(path): return
+    def install(cls, path: Path, force: bool = False, delete_tmp_file: bool = True) -> Type[SteamCMD]:
+        cls.default_install_dir = path
+
+        if cls.is_installed(path) and not force: return
 
         try:
             system_os = platform.system().lower()
@@ -115,7 +116,7 @@ class SteamCMD:
         return cls
 
 class ArmaClient:
-    steam_game_id = 233780
+    steam_game_id = '233780'
 
     def __init__(self, **opts):
         self._opts = opts
@@ -134,7 +135,7 @@ class ArmaClient:
 
     @property
     def subprocess_callable(self) -> Sequence[str]:
-        return [self._opts.get('path')] + [
+        return [self.path] + [
             self._format_arg(*x) if type(x) in [list, tuple] else self._format_arg(x) for x in self.cli_args
         ]
 
@@ -147,13 +148,13 @@ class ArmaClient:
         return name
 
     @classmethod
-    def install(cls, validate: bool = True, path: Path = None) -> Type[ArmaClient]:
+    def install(cls, login: Tuple[str, str], validate: bool = True, path: Path = None) -> Type[ArmaClient]:
         cmd_arr = ['app_update', cls.steam_game_id]
 
         if validate:
             cmd_arr.append('validate')
 
-        steamcmd = SteamCMD().add(cmd_arr)
+        steamcmd = SteamCMD().login(*login)
 
         if path is not None:
             if path.exists():
@@ -164,7 +165,7 @@ class ArmaClient:
 
             steamcmd.add(['force_install_dir', os.fspath(path.absolute())])
 
-        steamcmd.run()
+        steamcmd.add(cmd_arr).run()
 
         return cls
 
@@ -174,13 +175,28 @@ if __name__ == '__main__':
 
     args = sys.argv[1:]
 
-    install_path = Path('/opt', 'steamcmd')
-    print(os.fspath(install_path))
+    base_path = Path.home().joinpath('Documents', 'a3server')
+    steam_path = base_path.joinpath('steamcmd')
+    arma_path = steam_path.joinpath('arma3')
 
-    if not install_path.exists(): os.makedirs(install_path)
+    os.chdir(arma_path)
 
-    SteamCMD.install(install_path)
-    
-    s = SteamCMD(install_path)
-    s.login(*args) # pylint: disable=no-value-for-parameter
-    s.run()
+    arma_args = {
+        'profiles': arma_path.joinpath('profiles'),
+        'config': arma_path.joinpath('config', 'config.cfg'),
+        'name': 'Arma 3 Testing server',
+        'world': 'empty'
+    }
+
+    for x in (steam_path, arma_path):
+        if not x.exists(): os.makedirs(x)
+
+    print([os.fspath(x) for x in (base_path, steam_path, arma_path)])
+
+    #SteamCMD.install(steam_path, force=True)
+
+    client = ArmaClient(
+        path=arma_path.joinpath('arma3server'),
+        **arma_args
+    )
+    client.run()
