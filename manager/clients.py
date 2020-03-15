@@ -168,35 +168,3 @@ class ArmaClient:
         steamcmd.add(cmd_arr).run()
 
         return cls
-
-if __name__ == '__main__':
-    import os
-    import sys
-
-    args = sys.argv[1:]
-
-    base_path = Path.home().joinpath('Documents', 'a3server')
-    steam_path = base_path.joinpath('steamcmd')
-    arma_path = steam_path.joinpath('arma3')
-
-    os.chdir(arma_path)
-
-    arma_args = {
-        'profiles': arma_path.joinpath('profiles'),
-        'config': arma_path.joinpath('config', 'config.cfg'),
-        'name': 'Arma 3 Testing server',
-        'world': 'empty'
-    }
-
-    for x in (steam_path, arma_path):
-        if not x.exists(): os.makedirs(x)
-
-    print([os.fspath(x) for x in (base_path, steam_path, arma_path)])
-
-    #SteamCMD.install(steam_path, force=True)
-
-    client = ArmaClient(
-        path=arma_path.joinpath('arma3server'),
-        **arma_args
-    )
-    client.run()
