@@ -31,7 +31,7 @@ def install(args):
         ArmaClient.install(login=args, path=INSTALL_DIR)
 
 def run():
-    ArmaClient(path=INSTALL_DIR.joinpath('arma3server.exe')).run()
+    ArmaClient(path=INSTALL_DIR).run()
 
 flags = []
 args = []

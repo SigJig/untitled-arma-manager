@@ -119,7 +119,21 @@ class ArmaClient:
     def __init__(self, **opts):
         self._opts = opts
         self.path = self._opts.pop('path')
+        self._mods = self._opts.pop('mods', {})
+        self._loaded_mods = []
         self.cli_args = []
+
+        if self._mods:
+            dir_ = PurePath(self.mods.get('dir', 'mods'))
+
+            if not dir_.is_absolute():
+                self._mods['dir'] = self.path.joinpath(dir_)
+            else:
+                self._mods['dir'] = Path(dir_)
+
+            load = self.mods.get('load', [])
+
+            if load: self.load_mod(*load)
 
         self.add_arg(*self._opts.items())
 
@@ -131,9 +145,28 @@ class ArmaClient:
 
         return self
 
+    def load_mod(self, *mods) -> None:
+        path = self.mods['dir']
+
+        for i in mods:
+            if (joined := path.joinpath(i)).exists():
+                self._loaded_mods.append(str(joined))
+            else:
+                raise Exception('Invalid mod ' + i)
+
+    @property
+    def mods(self) -> dict:
+        if self._mods: return self._mods
+
+        raise Exception('Mods not specified')
+
+    @property
+    def executable(self) -> str:
+        return self.path.joinpath('arma3server.exe')
+
     @property
     def subprocess_callable(self) -> Sequence[str]:
-        return [self.path] + [
+        return [self.executable] + [
             self._format_arg(*x) if type(x) in [list, tuple] else self._format_arg(x) for x in self.cli_args
         ]
 
