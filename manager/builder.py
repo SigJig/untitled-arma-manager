@@ -91,36 +91,12 @@ class BuilderOptions:
 
         return self.source_dir.joinpath(pure)
 
-    def _current_mission_idx(self, filename: str) -> int:
-        highest = 0
-        prefix = filename + '_'
-        for f in self.missions_dir.glob(f'{prefix}[0-9]*.*'):
-            if f.is_file() and (match := re.match(re.compile(f'{prefix}([0-9]+)'), f.name)):
-                num_parsed = int(match.group(1))
-
-                if num_parsed > highest:
-                    highest = num_parsed
-
-        return highest
-
-    def _next_mission_idx(self, filename: str) -> int:
-        idx = self._current_mission_idx(filename)
-
-        return idx + 1 if idx else 0
-
-    def _next_mission_name(self, filename: str) -> str:
-        prefix = filename + '_'
-
-        return prefix + str(self._next_mission_idx(filename))
-
     @property
     def filename(self) -> str:
         try:
-            filename = self.output['filename']
+            return self.output['filename']
         except KeyError:
             raise Exception('Filename is not present')
-        else:
-            return self._next_mission_name(filename) + '.pbo'
 
     @property
     def should_binarize(self) -> bool:
@@ -239,9 +215,32 @@ class Builder:
                 shutil.copy(src, dst)
 
     def _binarize(self) -> None:
-        binarizer = self.opts.binarizer(self.opts.tmp_dir, self.opts.missions_dir.joinpath(self.opts.filename))
+        mission_name = self.next_mission_name() + '.pbo'
+        binarizer = self.opts.binarizer(self.opts.tmp_dir, self.opts.missions_dir.joinpath(mission_name))
 
         return binarizer.binarize()
+        
+    def current_mission_idx(self) -> int:
+        highest = -1
+        prefix = self.opts.filename + '_'
+        for f in self.opts.missions_dir.glob(f'{prefix}[0-9]*.*'):
+            if f.is_file() and (match := re.match(re.compile(f'{prefix}([0-9]+)'), f.name)):
+                num_parsed = int(match.group(1))
+
+                if num_parsed > highest:
+                    highest = num_parsed
+
+        return highest
+
+    def next_mission_idx(self) -> int:
+        idx = self.current_mission_idx()
+
+        return idx + 1
+
+    def next_mission_name(self) -> str:
+        prefix = self.opts.filename + '_'
+
+        return prefix + str(self.next_mission_idx())
 
     def __hash__(self) -> Any:
         return self.build()
