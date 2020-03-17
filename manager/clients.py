@@ -91,19 +91,17 @@ class SteamCMD:
             uri = cls.uri + filename
             r = requests.get(uri, stream=True)
 
-            _zip_path = path.joinpath(filename)
-            with open(_zip_path, 'wb') as fp:
-                for chunk in r.iter_content(chunk_size=cls.stream_chunk_size):
-                    fp.write(chunk)
+            if not path.exists():
+                os.makedirs(path)
+
+            mem_file = io.BytesIO(r.content)
 
             if system_os == 'linux':
-                file_obj = tarfile.TarFile.open(_zip_path)
+                file_obj = tarfile.TarFile.open(fileobj=mem_file)
             else:
-                file_obj = zipfile.ZipFile(_zip_path)
+                file_obj = zipfile.ZipFile(mem_file)
             
             file_obj.extractall(path)
-
-            if delete_tmp_file: os.remove(_zip_path)
 
         return cls
 
@@ -126,7 +124,7 @@ class ArmaClient:
         self.add_arg(*self._opts.items())
 
     def run(self):
-        subprocess.check_call(self.subprocess_callable)
+        subprocess.check_call(self.subprocess_callable, cwd=self.path.parent)
 
     def add_arg(self, *args: Sequence[Union[str, Tuple[str, str]]]):
         self.cli_args.extend(args)

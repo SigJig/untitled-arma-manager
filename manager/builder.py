@@ -1,8 +1,6 @@
 
-import os
-import abc
-import json
-import shutil
+import os, re, abc, json, shutil, collections
+
 from typing import (
     Type,
     Any,
@@ -11,7 +9,7 @@ from typing import (
 )
 from pathlib import Path, PurePath
 from pboutil import PBOFile
-from hashing import hash_dir, hash_file
+from .hashing import hash_dir, hash_file
 
 class Binarizer(abc.ABC):
     def __init__(self, path: Path, out_path: Path) -> None:
@@ -93,12 +91,36 @@ class BuilderOptions:
 
         return self.source_dir.joinpath(pure)
 
+    def _current_mission_idx(self, filename: str) -> int:
+        highest = 0
+        prefix = filename + '_'
+        for f in self.missions_dir.glob(f'{prefix}[0-9]*.*'):
+            if f.is_file() and (match := re.match(re.compile(f'{prefix}([0-9]+)'), f.name)):
+                num_parsed = int(match.group(1))
+
+                if num_parsed > highest:
+                    highest = num_parsed
+
+        return highest
+
+    def _next_mission_idx(self, filename: str) -> int:
+        idx = self._current_mission_idx(filename)
+
+        return idx + 1 if idx else 0
+
+    def _next_mission_name(self, filename: str) -> str:
+        prefix = filename + '_'
+
+        return prefix + str(self._next_mission_idx(filename))
+
     @property
     def filename(self) -> str:
         try:
-            return self.output['filename'] + '.pbo'
+            filename = self.output['filename']
         except KeyError:
             raise Exception('Filename is not present')
+        else:
+            return self._next_mission_name(filename) + '.pbo'
 
     @property
     def should_binarize(self) -> bool:
@@ -121,9 +143,12 @@ class BuilderOptions:
         if not self._paths: return []
 
         for p in self._paths:
-            src, dst = self._process_pure_path(p[0]), self._process_pure_path(p[1]) if len(p) > 1 else None
+            if isinstance(p, collections.Sequence) and not isinstance(p, str) and len(p) > 1:
+                src, dst = self._process_pure_path(p[0]), self._process_pure_path(p[1])
 
-            yield src, dst
+                yield src, dst
+            else:
+                yield self._process_pure_path(p), None
 
     @classmethod
     def from_json(cls, json_: Union[str, Path], is_file: bool = True) -> Any:
@@ -151,12 +176,6 @@ class Builder:
         
         self._out_file = None
         self.built_hash = None
-
-    def __del__(self):
-        """
-        if self.opts and self.opts.tmp_dir.exists():
-            shutil.rmtree(self.opts.tmp_dir)
-        """
 
     @property
     def out_file(self) -> Path:
