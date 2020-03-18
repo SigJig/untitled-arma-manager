@@ -150,6 +150,8 @@ class Builder:
 
         self.opts = opts
         
+        self._mission_prefix = self.opts.filename + '_'
+
         self._out_file = None
         self.built_hash = None
 
@@ -164,6 +166,40 @@ class Builder:
             self._out_file = self._binarize()
 
         return self._out_file
+
+    @property 
+    def current_mission_idx(self) -> int:
+        highest = -1
+        for f in self.opts.missions_dir.glob(f'{self._mission_prefix}[0-9]*'):
+            if (match := re.match(re.compile(f'{self._mission_prefix}([0-9]+)'), f.name)):
+                num_parsed = int(match.group(1))
+
+                if num_parsed > highest:
+                    highest = num_parsed
+
+        return highest
+
+    @property
+    def next_mission_idx(self) -> int:
+        idx = self.current_mission_idx
+
+        return idx + 1
+
+    @property
+    def current_mission_name(self) -> str:
+        return self._mission_prefix + str(self.current_mission_idx)
+
+    @property
+    def next_mission_name(self) -> str:
+        return self._mission_prefix + str(self.next_mission_idx)
+
+    @property
+    def current_mission(self) -> str:
+        return self.opts.missions_dir.joinpath(self.current_mission_name)
+
+    @property
+    def next_mission(self) -> str:
+        return self.opts.missions_dir.joinpath(self.next_mission_name)
 
     def _verify_dir(self, dir_: Path) -> None:
         if not dir_.exists():
@@ -215,32 +251,10 @@ class Builder:
                 shutil.copy(src, dst)
 
     def _binarize(self) -> None:
-        mission_name = self.next_mission_name() + '.pbo'
+        mission_name = self.next_mission_name + '.pbo'
         binarizer = self.opts.binarizer(self.opts.tmp_dir, self.opts.missions_dir.joinpath(mission_name))
 
         return binarizer.binarize()
-        
-    def current_mission_idx(self) -> int:
-        highest = -1
-        prefix = self.opts.filename + '_'
-        for f in self.opts.missions_dir.glob(f'{prefix}[0-9]*.*'):
-            if f.is_file() and (match := re.match(re.compile(f'{prefix}([0-9]+)'), f.name)):
-                num_parsed = int(match.group(1))
-
-                if num_parsed > highest:
-                    highest = num_parsed
-
-        return highest
-
-    def next_mission_idx(self) -> int:
-        idx = self.current_mission_idx()
-
-        return idx + 1
-
-    def next_mission_name(self) -> str:
-        prefix = self.opts.filename + '_'
-
-        return prefix + str(self.next_mission_idx())
 
     def __hash__(self) -> Any:
         return self.build()
@@ -257,8 +271,13 @@ class Builder:
 
                 self.built_hash = hash_file(binarized)
             else:
-                if self.opts.out_dir.is_file():
+                if self.opts.missions_dir.is_file():
                     raise TypeError(f'Output directory is a file')
+
+                shutil.copytree(
+                    self.opts.tmp_dir,
+                    self.opts.missions_dir.joinpath(self.next_mission_name)
+                )
 
                 self.built_hash = hash_dir(self.opts.tmp_dir)
 
