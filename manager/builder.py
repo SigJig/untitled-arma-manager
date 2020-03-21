@@ -24,11 +24,16 @@ class Binarizer(abc.ABC):
         if not parent.exists():
             os.makedirs(parent)
 
+    @abc.abstractproperty
+    def ext(self) -> str: pass
+
     @abc.abstractmethod
     def binarize(self) -> Any:
         pass
 
 class PBOPacker(Binarizer):
+    ext = '.pbo'
+
     def binarize(self) -> Path:
         file = PBOFile.from_directory(self.path)
 
@@ -92,6 +97,13 @@ class BuilderOptions:
         return self.source_dir.joinpath(pure)
 
     @property
+    def file_ext(self) -> str:
+        if self.should_binarize:
+            return self.binarizer.ext
+
+        return ''
+
+    @property
     def filename(self) -> str:
         try:
             return self.output['filename']
@@ -151,9 +163,9 @@ class Builder:
         self.opts = opts
         
         self._mission_prefix = self.opts.filename + '_'
+        self._is_built = False
 
         self._out_file = None
-        self.built_hash = None
 
     @property
     def out_file(self) -> Path:
@@ -187,19 +199,25 @@ class Builder:
 
     @property
     def current_mission_name(self) -> str:
-        return self._mission_prefix + str(self.current_mission_idx)
+        return self._format_mission_name(str(self.current_mission_idx))
 
     @property
     def next_mission_name(self) -> str:
-        return self._mission_prefix + str(self.next_mission_idx)
+        return self._format_mission_name(str(self.next_mission_idx))
 
     @property
     def current_mission(self) -> str:
-        return self.opts.missions_dir.joinpath(self.current_mission_name)
+        return self.opts.missions_dir.joinpath(self._add_ext(self.current_mission_name))
 
     @property
     def next_mission(self) -> str:
-        return self.opts.missions_dir.joinpath(self.next_mission_name)
+        return self.opts.missions_dir.joinpath(self._add_ext(self.next_mission_name))
+
+    def _add_ext(self, f: str) -> str:
+        return f + self.opts.file_ext
+
+    def _format_mission_name(self, mission: str) -> str:
+        return self._mission_prefix + mission
 
     def _verify_dir(self, dir_: Path) -> None:
         if not dir_.exists():
@@ -251,34 +269,33 @@ class Builder:
                 shutil.copy(src, dst)
 
     def _binarize(self) -> None:
-        mission_name = self.next_mission_name + '.pbo'
-        binarizer = self.opts.binarizer(self.opts.tmp_dir, self.opts.missions_dir.joinpath(mission_name))
+        binarizer = self.opts.binarizer(self.opts.tmp_dir, self.next_mission)
 
         return binarizer.binarize()
 
+    def _del_tmp(self) -> None:
+        if self.opts.tmp_dir.exists(): shutil.rmtree(self.opts.tmp_dir)
+
     def __hash__(self) -> Any:
-        return self.build()
+        raise NotImplementedError()
+        #return self.build()
 
     def build(self) -> Any:
-        if self.built_hash is None:
-            if self.opts.tmp_dir.exists():
-                shutil.rmtree(self.opts.tmp_dir)
+        if not self._is_built:
+            self._del_tmp()
 
             self._join_sources()
 
             if self.opts.should_binarize:
-                binarized = self._binarize()
-
-                self.built_hash = hash_file(binarized)
+                self._binarize()
             else:
                 if self.opts.missions_dir.is_file():
                     raise TypeError(f'Output directory is a file')
 
-                shutil.copytree(
-                    self.opts.tmp_dir,
-                    self.opts.missions_dir.joinpath(self.next_mission_name)
-                )
+                shutil.copytree(self.opts.tmp_dir, self.next_mission)
 
-                self.built_hash = hash_dir(self.opts.tmp_dir)
+            self.is_built = True
 
-        return self.built_hash
+            #self._del_tmp()
+
+        return self.current_mission

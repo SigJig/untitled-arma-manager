@@ -22,11 +22,8 @@ class SteamCMD:
         'linux': 'steamcmd_linux.tar.gz'
     }
     stream_chunk_size = 8 * 1024
-    default_install_dir = Path.home().joinpath('steamcmd')
 
-    def __init__(self, path: Path = None) -> SteamCMD:
-        path = path or type(self).default_install_dir
-
+    def __init__(self, path: Path) -> SteamCMD:
         if path.is_dir():
             self.path = path.joinpath('steamcmd.sh' if platform.system() == 'Linux' else 'steamcmd.exe')
         else:
@@ -36,6 +33,7 @@ class SteamCMD:
 
     def run(self):
         callable_ = self.subprocess_callable
+        print(callable_)
 
         subprocess.check_call(callable_)
 
@@ -77,8 +75,6 @@ class SteamCMD:
 
     @classmethod
     def install(cls, path: Path, force: bool = False, delete_tmp_file: bool = True) -> Type[SteamCMD]:
-        cls.default_install_dir = path
-
         if cls.is_installed(path) and not force: return
 
         try:
@@ -138,6 +134,7 @@ class ArmaClient:
         self.add_arg(*self._opts.items())
 
     def run(self):
+        print(self.subprocess_callable)
         subprocess.check_call(self.subprocess_callable, cwd=self.path.parent)
 
     def add_arg(self, *args: Sequence[Union[str, Tuple[str, str]]]):
@@ -149,7 +146,9 @@ class ArmaClient:
         path = self.mods['dir']
 
         for i in mods:
-            if (joined := path.joinpath(i)).exists():
+            if isinstance(i, Path) and i.is_absolute():
+                self._loaded_mods.append(str(i))
+            elif (joined := path.joinpath(i)).exists():
                 self._loaded_mods.append(str(joined))
             else:
                 raise Exception('Invalid mod ' + i)
@@ -162,10 +161,13 @@ class ArmaClient:
 
     @property
     def executable(self) -> str:
-        return self.path.joinpath('arma3server.exe')
+        return self.path.joinpath('arma3server_x64.exe')
 
     @property
     def subprocess_callable(self) -> Sequence[str]:
+        if self._loaded_mods:
+            self.add_arg(['mod', ';'.join(self._loaded_mods) + ';'])
+
         return [self.executable] + [
             self._format_arg(*x) if type(x) in [list, tuple] else self._format_arg(x) for x in self.cli_args
         ]
@@ -179,20 +181,18 @@ class ArmaClient:
         return name
 
     @classmethod
-    def install(cls, login: Tuple[str, str], validate: bool = True, path: Path = None) -> Type[ArmaClient]:
+    def install(cls, login: Tuple[str, str], validate: bool = True, path: Path = None, steam_path: Path = None) -> Type[ArmaClient]:
         cmd_arr = ['app_update', cls.steam_game_id]
 
         if validate:
             cmd_arr.append('validate')
 
-        steamcmd = SteamCMD().login(*login)
+        steamcmd = SteamCMD(steam_path).login(*login)
 
         if path is not None:
             if path.exists():
                 if not path.is_dir():
-                    raise FileExistsError(path)
-                elif os.listdir(path):
-                    raise Exception(f'Directory "{path}" is not empty')
+                    raise TypeError(path + ' is a file')
 
             steamcmd.add(['force_install_dir', os.fspath(path.absolute())])
 
