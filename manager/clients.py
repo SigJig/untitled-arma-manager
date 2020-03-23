@@ -135,7 +135,7 @@ class ArmaClient:
 
     def run(self):
         print(self.subprocess_callable)
-        subprocess.check_call(self.subprocess_callable, cwd=self.path.parent)
+        subprocess.check_call(self.subprocess_callable, cwd=self.path)
 
     def add_arg(self, *args: Sequence[Union[str, Tuple[str, str]]]):
         self.cli_args.extend(args)
@@ -161,7 +161,14 @@ class ArmaClient:
 
     @property
     def executable(self) -> str:
-        return self.path.joinpath('arma3server_x64.exe')
+        if platform.system() == 'Linux':
+            exe = 'arma3server'
+        elif self._opts.get('64bit', False):
+            exe = 'arma3server_x64.exe'
+        else:
+            exe = 'arma3server.exe'
+
+        return self.path.joinpath(exe)
 
     @property
     def subprocess_callable(self) -> Sequence[str]:

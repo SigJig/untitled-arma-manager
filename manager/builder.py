@@ -128,7 +128,7 @@ class BuilderOptions:
 
     @property
     def paths(self) -> List[Any]:
-        if not self._paths: return []
+        if not self._paths: yield PurePath(), PurePath()
 
         for p in self._paths:
             if isinstance(p, collections.Sequence) and not isinstance(p, str) and len(p) > 1:
@@ -237,11 +237,7 @@ class Builder:
             else:
                 shutil.copy(src_joined, dst_joined)
 
-    def _join_sources(self) -> None:
-        self._verify_dir(self.opts.tmp_dir)
-
-        for src_pure, dst_pure in self.opts.paths:
-
+    def _join_source(self, src_pure: Path, dst_pure: Path) -> None:
             # pylint: disable=unsubscriptable-object
             src = self.opts.source_dir.joinpath(src_pure)
 
@@ -267,6 +263,12 @@ class Builder:
                     shutil.copytree(src, dst)
             else:
                 shutil.copy(src, dst)
+
+    def _join_sources(self) -> None:
+        self._verify_dir(self.opts.tmp_dir)
+
+        for paths in self.opts.paths:
+            self._join_source(*paths)
 
     def _binarize(self) -> None:
         binarizer = self.opts.binarizer(self.opts.tmp_dir, self.next_mission)
