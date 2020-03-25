@@ -11,6 +11,7 @@ pyunpack = "*"
 [packages]
 pboutil = "*"
 requests = "*"
+python-dotenv = "*"
 
 [requires]
 python_version = "3.8"

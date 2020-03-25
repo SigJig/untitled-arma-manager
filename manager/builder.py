@@ -37,6 +37,7 @@ class PBOPacker(Binarizer):
     def binarize(self) -> Path:
         file = PBOFile.from_directory(self.path)
 
+        print('out ', self.out_path)
         file.to_file(self.out_path)
 
         return self.out_path
@@ -45,13 +46,35 @@ BINARIZERS = {
     'pbopacker': PBOPacker
 }
 
+class Linker:
+    def __init__(self, **opts) -> None:
+        self.source = Path(opts.pop('source'))
+        self.dest = opts.pop('dest')
+
+        if not isinstance(self.dest, (list, tuple)):
+            self.dest = [self.dest]
+
+        self.dest = [Path(x) for x in self.dest]
+
+    def run(self):
+        for i in self.dest:
+            try:
+                os.remove(i)
+            # Workaround because .exists() was returning False
+            # even though the file existed
+            except FileNotFoundError:
+                pass
+
+            os.symlink(self.source, i)
+
 class BuilderOptions:
     _default_output = {
         'binarizer': PBOPacker,
         'should_binarize': True,
         'tmp_dir': 'tmp',
         'missions_dir': 'missions',
-        'filename': 'mission'
+        'filename': 'mission',
+        'links': []
     }
 
     def __init__(self, **opts) -> None:
@@ -65,12 +88,12 @@ class BuilderOptions:
             raise Exception('Missing source_dir')
 
         self.source_dir = self._process_path(self.opts['source_dir'])
-        self._paths = opts.get('paths', [])
+        self._paths = opts.get('include', [])
 
         if self.output.get('should_binarize'):
             if bnzr := self.output.get('binarizer', ''):
                 try:
-                    if not isinstance(bnzr, Binarizer) and not issubclass(bnzr, Binarizer):
+                    if isinstance(bnzr, str):
                         print(type(bnzr))
                         bnzr = BINARIZERS[bnzr]
                     
@@ -124,7 +147,7 @@ class BuilderOptions:
 
     @property
     def missions_dir(self) -> Path:
-        return self._process_path(self.output['missions_dir'])
+        return self._process_path(self.output['dir'])
 
     @property
     def paths(self) -> List[Any]:
@@ -227,6 +250,8 @@ class Builder:
         self._verify_dir(dst)
 
         for entry in os.scandir(src):
+            if Path(entry) == self.opts.tmp_dir: continue
+
             name = entry.name
             src_joined, dst_joined = (x.joinpath(name) for x in (src, dst))
 
@@ -267,6 +292,7 @@ class Builder:
     def _join_sources(self) -> None:
         self._verify_dir(self.opts.tmp_dir)
 
+        print(self.opts.source_dir.joinpath(next(self.opts.paths)[0]))
         for paths in self.opts.paths:
             self._join_source(*paths)
 
@@ -282,22 +308,31 @@ class Builder:
         raise NotImplementedError()
         #return self.build()
 
+    def _build(self) -> Any:
+        self._del_tmp()
+
+        self._join_sources()
+
+        if self.opts.should_binarize:
+            self._binarize()
+        else:
+            if self.opts.missions_dir.is_file():
+                raise TypeError(f'Output directory is a file')
+
+            shutil.copytree(self.opts.tmp_dir, self.next_mission)
+
+        if links := self.opts.output['links']:
+            linker = Linker(source=self.current_mission, dest=links)
+            linker.run()
+
+        self._del_tmp()
+
+        self.is_built = True
+
+        return self
+
     def build(self) -> Any:
         if not self._is_built:
-            self._del_tmp()
-
-            self._join_sources()
-
-            if self.opts.should_binarize:
-                self._binarize()
-            else:
-                if self.opts.missions_dir.is_file():
-                    raise TypeError(f'Output directory is a file')
-
-                shutil.copytree(self.opts.tmp_dir, self.next_mission)
-
-            self.is_built = True
-
-            #self._del_tmp()
+            self._build()
 
         return self.current_mission

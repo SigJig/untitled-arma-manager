@@ -74,9 +74,7 @@ class SteamCMD:
         return path.exists() and bool(os.listdir(path))
 
     @classmethod
-    def install(cls, path: Path, force: bool = False, delete_tmp_file: bool = True) -> Type[SteamCMD]:
-        if cls.is_installed(path) and not force: return
-
+    def install(cls, path: Path) -> Type[SteamCMD]:
         try:
             system_os = platform.system().lower()
 
@@ -188,8 +186,15 @@ class ArmaClient:
         return name
 
     @classmethod
+    def is_installed(cls, path: Path) -> bool:
+        return path.exists() and bool(os.listdir(path))
+
+    @classmethod
     def install(cls, login: Tuple[str, str], validate: bool = True, path: Path = None, steam_path: Path = None) -> Type[ArmaClient]:
         cmd_arr = ['app_update', cls.steam_game_id]
+
+        if not steam_path:
+            steam_path = path.parent
 
         if validate:
             cmd_arr.append('validate')
