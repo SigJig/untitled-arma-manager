@@ -37,7 +37,6 @@ class PBOPacker(Binarizer):
     def binarize(self) -> Path:
         file = PBOFile.from_directory(self.path)
 
-        print('out ', self.out_path)
         file.to_file(self.out_path)
 
         return self.out_path
@@ -45,6 +44,17 @@ class PBOPacker(Binarizer):
 BINARIZERS = {
     'pbopacker': PBOPacker
 }
+
+def process_steps(steps: list) -> None:
+    for step in steps:
+        type_ = step.pop('type').lower()
+
+        if type_ == 'build':
+            Builder(step).build()
+        elif type_ == 'link':
+            Linker(**step).run()
+        else:
+            raise Exception(f'Unknown type {type_}')
 
 class Linker:
     def __init__(self, **opts) -> None:
@@ -64,6 +74,9 @@ class Linker:
             # even though the file existed
             except FileNotFoundError:
                 pass
+
+            if not i.parent.exists():
+                os.makedirs(i.parent)
 
             os.symlink(self.source, i)
 
@@ -94,7 +107,6 @@ class BuilderOptions:
             if bnzr := self.output.get('binarizer', ''):
                 try:
                     if isinstance(bnzr, str):
-                        print(type(bnzr))
                         bnzr = BINARIZERS[bnzr]
                     
                     self.output['binarizer'] = bnzr
@@ -292,7 +304,6 @@ class Builder:
     def _join_sources(self) -> None:
         self._verify_dir(self.opts.tmp_dir)
 
-        print(self.opts.source_dir.joinpath(next(self.opts.paths)[0]))
         for paths in self.opts.paths:
             self._join_source(*paths)
 

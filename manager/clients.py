@@ -1,7 +1,7 @@
 
 from __future__ import annotations
 
-import io, os, requests, platform, zipfile, tarfile, subprocess
+import io, os, abc, shutil, requests, platform, zipfile, tarfile, subprocess
 
 from pathlib import (
     Path,
@@ -15,25 +15,59 @@ from typing import (
     List
 )
 
-class SteamCMD:
-    uri = 'https://steamcdn-a.akamaihd.net/client/installer/'
-    filenames = {
-        'windows': 'steamcmd.zip',
-        'linux': 'steamcmd_linux.tar.gz'
-    }
-    stream_chunk_size = 8 * 1024
+from .config import config
+
+from .const import (
+    IS_LINUX,
+    STEAM_DL_FILE,
+    STEAM_DL_URL,
+    STEAM_EXECUTABLE,
+    ARMA_STEAM_ID
+)
+
+class Service(abc.ABC):
+    @abc.abstractproperty
+    def path(self) -> Union[Path, str]: pass
+
+    @abc.abstractproperty
+    def name(self) -> str: pass
+
+    @abc.abstractmethod
+    def install(self): pass
+
+    def is_installed(self):
+        path = self.path
+
+        if not isinstance(self.path):
+            path = Path(self.path)
+
+        return path.exists() and bool(os.listdir(path))
+
+    @classmethod
+    def create(cls, to_create: str, *args, **kwargs) -> Service:
+        for i in cls.__subclasses__():
+            if i.name == to_create:
+                return i(*args, **kwargs)
+
+        raise Exception(f'Invalid service {to_create}')
+
+class SteamCMD(Service):
+    path = None
+    name = 'steamcmd'
 
     def __init__(self, path: Path) -> SteamCMD:
-        if path.is_dir():
-            self.path = path.joinpath('steamcmd.sh' if platform.system() == 'Linux' else 'steamcmd.exe')
-        else:
-            self.path = path
+        self.path = path
 
+        if not isinstance(self.path, Path):
+            self.path = Path(self.path)
+
+        if not self.path.is_dir():
+            self.path = self.path.parent
+        
         self.args = []
 
     def run(self):
         callable_ = self.subprocess_callable
-        print(callable_)
 
         subprocess.check_call(callable_)
 
@@ -60,8 +94,12 @@ class SteamCMD:
         return self.add(cmd_arr)
 
     @property
+    def executable(self) -> Path:
+        return self.path.joinpath(STEAM_EXECUTABLE)
+
+    @property
     def subprocess_callable(self) -> Sequence[str]:
-        res = [self.path]
+        res = [self.executable]
         res += ['{}'.format(' '.join(x)) for x in self.args]
 
         return res + [self._format_arg('quit')]
@@ -69,50 +107,44 @@ class SteamCMD:
     def _format_arg(self, arg: str) -> str:
         return '+' + arg
 
-    @classmethod
-    def is_installed(cls, path: Path) -> bool:
-        return path.exists() and bool(os.listdir(path))
+    def install(self) -> SteamCMD:
+        self.uninstall()
 
-    @classmethod
-    def install(cls, path: Path) -> Type[SteamCMD]:
-        try:
-            system_os = platform.system().lower()
+        url = STEAM_DL_URL + STEAM_DL_FILE
+        r = requests.get(url, stream=True)
 
-            filename = cls.filenames[system_os]
-        except KeyError:
-            raise Exception(f'Unsupported platform {system_os}')
+        if not self.path.exists():
+            os.makedirs(self.path)
+
+        mem_file = io.BytesIO(r.content)
+
+        if IS_LINUX:
+            file_obj = tarfile.TarFile.open(fileobj=mem_file)
         else:
-            uri = cls.uri + filename
-            r = requests.get(uri, stream=True)
+            file_obj = zipfile.ZipFile(mem_file)
+        
+        file_obj.extractall(self.path)
 
-            if not path.exists():
-                os.makedirs(path)
+        return self
 
-            mem_file = io.BytesIO(r.content)
+    def uninstall(self) -> SteamCMD:
+        if not self.path.exists(): return
 
-            if system_os == 'linux':
-                file_obj = tarfile.TarFile.open(fileobj=mem_file)
-            else:
-                file_obj = zipfile.ZipFile(mem_file)
-            
-            file_obj.extractall(path)
+        shutil.rmtree(self.path)
 
-        return cls
+        return self
 
-    @classmethod
-    def uninstall(cls, path: Path) -> Type[SteamCMD]:
-        if not path.exists(): return
-
-        os.rmdir(path)
-
-        return cls
-
-class ArmaClient:
-    steam_game_id = '233780'
+class ArmaClient(Service):
+    path = None
+    name = 'arma3'
 
     def __init__(self, **opts):
         self._opts = opts
         self.path = self._opts.pop('path')
+
+        if not isinstance(self.path, Path):
+            self.path = Path(self.path)
+
         self._mods = self._opts.pop('mods', {})
         self._loaded_mods = []
         self.cli_args = []
@@ -125,14 +157,9 @@ class ArmaClient:
             else:
                 self._mods['dir'] = Path(dir_)
 
-            load = self.mods.get('load', [])
-
-            if load: self.load_mod(*load)
-
         self.add_arg(*self._opts.items())
 
     def run(self):
-        print(self.subprocess_callable)
         subprocess.check_call(self.subprocess_callable, cwd=self.path)
 
     def add_arg(self, *args: Sequence[Union[str, Tuple[str, str]]]):
@@ -140,10 +167,10 @@ class ArmaClient:
 
         return self
 
-    def load_mod(self, *mods) -> None:
+    def load_mods(self) -> None:
         path = self.mods['dir']
 
-        for i in mods:
+        for i in self.mods.get('load', []):
             if isinstance(i, Path) and i.is_absolute():
                 self._loaded_mods.append(str(i))
             elif (joined := path.joinpath(i)).exists():
@@ -159,7 +186,7 @@ class ArmaClient:
 
     @property
     def executable(self) -> str:
-        if platform.system() == 'Linux':
+        if IS_LINUX:
             exe = 'arma3server'
         elif self._opts.get('64bit', False):
             exe = 'arma3server_x64.exe'
@@ -170,8 +197,13 @@ class ArmaClient:
 
     @property
     def subprocess_callable(self) -> Sequence[str]:
-        if self._loaded_mods:
-            self.add_arg(['mod', ';'.join(self._loaded_mods) + ';'])
+        try:
+            self.load_mods()
+        except:
+            pass
+        else:
+            if self._loaded_mods:
+                self.add_arg(['mod', ';'.join(self._loaded_mods) + ';'])
 
         return [self.executable] + [
             self._format_arg(*x) if type(x) in [list, tuple] else self._format_arg(x) for x in self.cli_args
@@ -185,29 +217,21 @@ class ArmaClient:
 
         return name
 
-    @classmethod
-    def is_installed(cls, path: Path) -> bool:
-        return path.exists() and bool(os.listdir(path))
+    def install(self) -> ArmaClient:
+        cmd_arr = ['app_update', ARMA_STEAM_ID, 'validate']
 
-    @classmethod
-    def install(cls, login: Tuple[str, str], validate: bool = True, path: Path = None, steam_path: Path = None) -> Type[ArmaClient]:
-        cmd_arr = ['app_update', cls.steam_game_id]
+        steamcmd = SteamCMD(**config.services['steamcmd']).login(
+            username=os.environ['steam_user'],
+            password=os.environ['steam_password']
+        )
 
-        if not steam_path:
-            steam_path = path.parent
+        if self.path is not None:
+            if self.path.exists():
+                if not self.path.is_dir():
+                    raise TypeError(self.path + ' is a file')
 
-        if validate:
-            cmd_arr.append('validate')
-
-        steamcmd = SteamCMD(steam_path).login(*login)
-
-        if path is not None:
-            if path.exists():
-                if not path.is_dir():
-                    raise TypeError(path + ' is a file')
-
-            steamcmd.add(['force_install_dir', os.fspath(path.absolute())])
+            steamcmd.add(['force_install_dir', os.fspath(self.path.absolute())])
 
         steamcmd.add(cmd_arr).run()
 
-        return cls
+        return self
