@@ -1,5 +1,5 @@
 
-import os, re, abc, json, shutil, collections
+import os, re, abc, shutil, collections
 
 from typing import (
     Type,
@@ -172,18 +172,6 @@ class BuilderOptions:
                 yield src, dst
             else:
                 yield self._process_pure_path(p), None
-
-    @classmethod
-    def from_json(cls, json_: Union[str, Path], is_file: bool = True) -> Any:
-        data = {}
-
-        if is_file:
-            with open(json_) as fp:
-                data = json.load(fp)
-        else:
-            data = json.loads(json_)
-
-        return cls(**data)
 
 # Possibly a user-defined class that sets instructions on how to compile the source files?
 # Option to pass custom packager (for example if you wanted to use a different PBO packer or ObfuSQF)
