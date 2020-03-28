@@ -54,7 +54,7 @@ class Service(abc.ABC):
 class SteamCMD(Service):
     name = 'steamcmd'
 
-    def __init__(self, path: Path) -> SteamCMD:
+    def __init__(self, path: Path, login: list = []) -> SteamCMD:
         self.path = path
 
         if not isinstance(self.path, Path):
@@ -63,6 +63,9 @@ class SteamCMD(Service):
         if not self.path.is_dir():
             self.path = self.path.parent
         
+        if login:
+            self.login(*login) # pylint: disable=no-value-for-parameter
+
         self.args = []
 
     def run(self):
@@ -218,10 +221,7 @@ class ArmaClient(Service):
     def install(self) -> ArmaClient:
         cmd_arr = ['app_update', ARMA_STEAM_ID, 'validate']
 
-        steamcmd = SteamCMD(**config.services['steamcmd']).login(
-            username=os.environ['STEAM_USER'],
-            password=os.environ['STEAM_PASSWORD']
-        )
+        steamcmd = SteamCMD(**config.services['steamcmd'])
 
         if self.path is not None:
             if self.path.exists():
