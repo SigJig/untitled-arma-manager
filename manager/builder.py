@@ -53,12 +53,16 @@ class PBOPacker(Binarizer):
 
         def from_directory(root: str) -> PBOFile:  # noqa: F821
             # maybe use .pboignore?
-            fns = [os.path.join(dirpath, name)[2:] for dirpath, dirnames, filenames in os.walk(root) for name in filenames]
+            fns = [
+                os.path.join(dirpath, name)
+                for dirpath, dirnames, filenames in os.walk(root)
+                for name in filenames
+            ]
             fns.sort(key=lambda x: x.lower())
 
             obj = PBOFile()
             for fn in fns:
-                add_file(obj, fn, fn)
+                add_file(obj, os.path.relpath(fn, root), fn)
             return obj
 
         file = from_directory(self.path)
