@@ -1,7 +1,9 @@
 
 
-import json
+import os, re, json
 from pathlib import Path
+
+from dotenv import load_dotenv
 
 from typing import (
     Any
@@ -21,7 +23,15 @@ class _Config:
         with open(self.file) as fp:
             self._data = json.load(fp)
 
+
         self._loaded = True
+        
+        if env := getattr(self, 'env', None):
+            if f := env.get('file', None):
+                load_dotenv(dotenv_path=f)
+            if vars_ := env.get('vars', {}):
+                for k, v in vars_.items():
+                    os.environ[k] = v
 
         return self
 
@@ -29,7 +39,31 @@ class _Config:
         if not self._loaded:
             self._load()
 
-        return self._data.get(*args)
+        val = self._data.get(*args)
+
+        a = self._handle_value(val)
+        return a
+
+    def _handle_string(self, value: str) -> str:
+        def repl(match: re.Match) -> str:
+            name = match.group(1)
+
+            try:
+                return str(os.environ[name])
+            except KeyError:
+                raise KeyError(f'Environment variable {name} not set')
+
+        return re.sub(r'\$(?<!\\)\{(?<!\\)([a-zA-Z0-9_]*)\}(?<!\\)', repl, value)
+
+    def _handle_value(self, value: Any):
+        if isinstance(value, str):
+            return self._handle_string(value)
+        elif isinstance(value, dict):
+            return {k: self._handle_value(v) for k, v in value.items()}
+        elif isinstance(value, (list, tuple)):
+            return [self._handle_value(x) for x in value]
+        else:
+            return value
     
     def __getattr__(self, *args) -> Any:
         return self._get(*args)

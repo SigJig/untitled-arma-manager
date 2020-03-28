@@ -26,8 +26,7 @@ from .const import (
 )
 
 class Service(abc.ABC):
-    @abc.abstractproperty
-    def path(self) -> Union[Path, str]: pass
+    path: Path = Path()
 
     @abc.abstractproperty
     def name(self) -> str: pass
@@ -45,6 +44,7 @@ class Service(abc.ABC):
 
     @classmethod
     def create(cls, to_create: str, *args, **kwargs) -> Service:
+        # TODO: This only works for direct subclasses
         for i in cls.__subclasses__():
             if i.name == to_create:
                 return i(*args, **kwargs)
@@ -52,7 +52,6 @@ class Service(abc.ABC):
         raise Exception(f'Invalid service {to_create}')
 
 class SteamCMD(Service):
-    path = None
     name = 'steamcmd'
 
     def __init__(self, path: Path) -> SteamCMD:
@@ -135,7 +134,6 @@ class SteamCMD(Service):
         return self
 
 class ArmaClient(Service):
-    path = None
     name = 'arma3'
 
     def __init__(self, **opts):
@@ -221,8 +219,8 @@ class ArmaClient(Service):
         cmd_arr = ['app_update', ARMA_STEAM_ID, 'validate']
 
         steamcmd = SteamCMD(**config.services['steamcmd']).login(
-            username=os.environ['steam_user'],
-            password=os.environ['steam_password']
+            username=os.environ['STEAM_USER'],
+            password=os.environ['STEAM_PASSWORD']
         )
 
         if self.path is not None:
