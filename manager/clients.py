@@ -1,7 +1,7 @@
 
 from __future__ import annotations
 
-import io, os, abc, shutil, requests, platform, zipfile, tarfile, subprocess
+import io, os, abc, time, shutil, signal, requests, platform, zipfile, tarfile, subprocess
 
 from pathlib import (
     Path,
@@ -71,7 +71,8 @@ class SteamCMD(Service):
     def run(self):
         callable_ = self.subprocess_callable
 
-        subprocess.check_call(callable_)
+        # For some reason installing using steamcmd does not return 0
+        subprocess.run(callable_)
 
     def add(self, *commands: Sequence[Union[str, list]]) -> SteamCMD:
         for command in commands:
@@ -138,6 +139,7 @@ class SteamCMD(Service):
 
 class ArmaClient(Service):
     name = 'arma3'
+    popen: subprocess.Popen = None
 
     def __init__(self, **opts):
         self._opts = opts
@@ -160,8 +162,22 @@ class ArmaClient(Service):
 
         self.add_arg(*self._opts.items())
 
+    def __del__(self):
+        self.kill()
+
     def run(self):
-        subprocess.check_call(self.subprocess_callable, cwd=self.path)
+        if self.popen is not None:
+            self.kill()
+
+        self.popen = subprocess.Popen(self.subprocess_callable, cwd=self.path)
+
+        self.popen.wait()
+
+    def kill(self):
+        if self.popen is not None or self.popen.poll() is None:
+            self.popen.terminate()
+
+        self.popen = None
 
     def add_arg(self, *args: Sequence[Union[str, Tuple[str, str]]]):
         self.cli_args.extend(args)
