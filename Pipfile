@@ -5,13 +5,11 @@ verify_ssl = true
 
 [dev-packages]
 pylint = "*"
-patool = "*"
-pyunpack = "*"
 
 [packages]
-pboutil = "*"
 requests = "*"
 python-dotenv = "*"
+pboutil = {editable = true,git = "https://gitlab.com/SigJig/pboutil.git"}
 
 [requires]
 python_version = "3.8"

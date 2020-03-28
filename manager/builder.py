@@ -35,38 +35,9 @@ class PBOPacker(Binarizer):
     ext = '.pbo'
 
     def binarize(self) -> Path:
-        """
-        This is a workaround, as the pboutil.PBOFile class does not correctly handle files.
-        This causes resource leaks, and our temporary folder can therefore not be deleted.
-        """
+        f = PBOFile.from_directory(self.path)
 
-        def to_file(self, fn: str) -> None:
-            with open(fn, 'wb') as fp:
-                fp.write(self.as_bytes())
-
-        def add_file(self, fn: str, data_fn: str) -> None:
-            print('Adding', fn)
-            fn = fn.replace('/', '\\')
-
-            with open(data_fn, 'rb') as fp:
-                pbo_files_add(self._pbo, fn, fp.read())
-
-        def from_directory(root: str) -> PBOFile:  # noqa: F821
-            # maybe use .pboignore?
-            fns = [
-                os.path.join(dirpath, name)
-                for dirpath, dirnames, filenames in os.walk(root)
-                for name in filenames
-            ]
-            fns.sort(key=lambda x: x.lower())
-
-            obj = PBOFile()
-            for fn in fns:
-                add_file(obj, os.path.relpath(fn, root), fn)
-            return obj
-
-        file = from_directory(self.path)
-        to_file(file, self.out_path)
+        f.to_file(self.out_path)
 
         return self.out_path
 
