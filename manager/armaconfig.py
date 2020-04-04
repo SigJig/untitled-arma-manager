@@ -1,27 +1,65 @@
 
-import functools
+import enum, functools, collections
 
 from pathlib import Path
-from typing import Any
+from typing import (
+    Any,
+    Union,
+    Sequence
+)
 
-class InvalidCharacterException(Exception):
+class Unexpected(Exception):
     def __init__(self, expected: list, got: str):
-        super().__init__(f'Invalid character encountered: Expected ({", ".join(expected)}), got "{got}"')
+        super().__init__(f'Invalid character encountered: Expected ({expected}), got "{got}"')
 
-def is_identifier(string):
-    if not (string[0] == '_' or string[0].isalpha()):
-        return False
+def to_dict(data):
+    dict_ = {}
 
-    return all(x.isalnum() or x == '_' for x in string)
+    for i in data:
+        if hasattr(i, 'to_dict'):
+            dict_[i.name] = i.to_dict()
+        else:
+            dict_[i.name] = i.value
+
+    return dict_
 
 class A3Class:
     def __init__(self, name, inherits, body):
         self.name = name
-        self.inherits = inherits
         self.body = body
+        
+        if inherits is not None:
+            pass
+        else:
+            self.inherits = None
+
+    def to_dict(self):
+        dict_ = to_dict(self.body)
+
+        if self.inherits:
+            return {
+                **self.inherits.to_dict(),
+                **dict_
+            }
+
+        return dict_
+
+    def __getitem__(self, item):
+        try:
+            return next(x for x in self.body if x.name == item)
+        except StopIteration:
+            if not self.inherits:
+                raise KeyError(item)
+
+            return self.inherits.__getattr__(item)
 
     def __repr__(self):
-        return f'<{type(self).__name__} -> {self.name} : {self.inherits} {{ {self.body} }}>'
+        if self.body:
+            body = ';'.join([str(x) for x in self.body]) + ';'
+        else:
+            body = ''
+
+        return f'<{type(self).__name__} -> {self.name} : {self.inherits} {{ {body} }}>'
 
 class A3Property:
     def __init__(self, name, value):
@@ -30,14 +68,11 @@ class A3Property:
 
     def _process_value(self, value):
         if isinstance(value, list):
-            return [self._process_value(x) for x in value]
+            return [self._process_value(x) for x in value if not isinstance(x, str) or x.strip()]
         else:
             value = value.strip()
 
-            if value and value[0] == '"':
-                if value[-1] != '"':
-                    raise Exception('Fuck you ' + value)
-
+            if value and value[0] == '"' and value[-1] == '"':
                 value = value[1:len(value) - 1]
 
             try:
@@ -51,211 +86,278 @@ class A3Property:
                 return value
 
     def __repr__(self):
-        return f'<{type(self).__name__} -> {self.name} = {self.value}>'
+        return f'<{type(self).__name__} -> {self.name} = {repr(self.value)}>'
 
-class Parser:
-    def __init__(self, stream, buf_len=2048):
+class TokenType(enum.Enum):
+    UNKNOWN = 0
+    STRING = 1
+    PREPRO = 2
+    IDENTIFIER = 3
+
+Token = collections.namedtuple('Token', ['type', 'lineno', 'value'])
+
+class Scanner:
+    def __init__(self, stream):
         self._stream = stream
-        self._buf_len = buf_len
+        self._lines = self._stream.readlines()
+        self._lineno = 0
         self._cursor = 0
-        
-        self._update_chunk()
 
-    def _move_cursor(self, length):
+    @property
+    def line(self):
+        return self._get_line(self._lineno)
+        
+    def _get_line(self, lineno):
+        try:
+            return self._lines[lineno]
+        except IndexError:
+            return ''
+
+    def _advance(self, length=1):
         self._cursor += length
+        
+        line_length = len(self.line)
+
+        if self._cursor >= line_length:
+            self._cursor -= line_length
+            self._lineno += 1
+
+        if self._lineno >= len(self._lines):
+            raise StopIteration
 
         return self
 
-    def _update_chunk(self, buf_len=None):
-        if buf_len is None:
-            buf_len = self._buf_len
-
-        chunk = self._stream.read(buf_len)
-        self._cursor = max(self._cursor - buf_len, 0)
-        self._chunk = chunk
-        
-        return chunk
-
-    def _get_while(self, cb, char=None, *args, **kwargs):
-        seq = ''
-        char = char or self._get(*args, **kwargs)
-
-        while cb(seq + char):
-            seq += char
-            char = self._get(*args, **kwargs)
-        
-        # Move the cursor back so the invalid character can be read again later
-        self._move_cursor(-1)
-
-        return seq
-
-    def _get(self, length=1, include_ws=False):
-        chunk = self._peek(length)
-
-        if not include_ws and chunk[0].isspace():
-            self._cursor += 1
-
-            return self._get(length)
-
-        self._move_cursor(length)
-
-        return chunk
-
     def _peek(self, length=1):
-        if self._cursor + length > self._buf_len:
-            self._update_chunk(self._cursor + length - self._buf_len)
+        line_length = len(self.line)
 
-        return self._chunk[self._cursor:self._cursor + length]
+        if self._cursor + length >= line_length:
+            remainder = self._cursor + length - line_length
+            line = self._get_line(self._lineno + 1)
 
-    def _parse_class_body(self):
-        next_char = self._get(1)
-        body = []
+            if remainder >= len(line):
+                raise StopIteration
 
-        while next_char != '}':
-            body.append(self._parse_one(next_char))
-            next_char = self._get(1)
+            return self.line[self._cursor:] + line[:remainder]
 
-        next_char = self._get(1)
-        if next_char != ';':
-            raise InvalidCharacterException(expected=[';'], got=next_char)
+        return self.line[self._cursor:self._cursor + length]
 
-        return body
+    def _get_raw(self, length=1):
+        seq = self._peek(length)
 
-    def _parse_class(self):
-        data = {
-            'name': self._get_while(is_identifier),
-            'inherits': None,
-            'body': []
-        }
-
-        if not data['name']:
-            raise Exception(f'Unnamed class encountered')
-
-        next_char = self._get(1)
-
-        if next_char == ':':
-            data['inherits'] = self._get_while(is_identifier)
-            next_char = self._get(1)
-        
-        if next_char == '{':
-            data['body'] = self._parse_class_body()
-        else:
-            raise InvalidCharacterException(expected=[':', '{'], got=next_char)
-
-        return data
-
-    def _parse_string(self, char=None):
-        next_char = char or self._get(1, include_ws=True)
-        seq = ''
-
-        while True:
-            if next_char == '"':
-                if self._peek(1) == '"':
-                    seq += self._get(1, include_ws=True)
-                else:
-                    return seq + next_char
-            else:
-                seq += next_char
-
-            next_char = self._get(1, include_ws=True)
-
-    def _parse_value(self, is_array=False, char=None):
-        special_chars = [';', ',', '}'] if is_array else [';']
-
-        next_char = char or self._get(1, include_ws=True)
-        seq = ''
-
-        while next_char not in special_chars:
-            if next_char == '"':
-                seq += '"' + self._parse_string()
-            else:
-                seq += next_char
-
-            next_char = self._get(1, include_ws=True)
-
-        self._move_cursor(-1)
+        self._advance(length)
 
         return seq
 
-    def _parse_array(self, char=None):
-        next_char = char or self._get(1)
+    def _find_delim(self, delim, advance=False):
+        seq = ''
+        length = len(delim)
 
-        if next_char != '{':
-            raise InvalidCharacterException(expected=['{'], got=next_char)
+        while self._peek(length) != delim:
+            seq += self._get_raw(length)
 
-        body = []
+        if advance:
+            self._advance(length)
 
-        while next_char != '}':
-            next_char = self._get(1)
+        return seq
 
-            if next_char == '{':
-                body.append(self._parse_array(char=next_char))
+    def _find_with_cb(self, callback, length=1, advance=False):
+        seq = ''
+
+        check = self._get_raw(length)
+
+        while callback(check):
+            seq += check
+            check = self._get_raw(length)
+
+        if not advance:
+            self._advance(-length)
+
+        return seq
+
+    def _get_string(self):
+        """
+        This method assumes that the first " has been found
+        """
+        def callback(char):
+            if char == '"':
+                if self._peek() != '"':
+                    return False
+
+                self._advance(1)
+
+            return True
+
+        return self._find_with_cb(callback, length=1, advance=True)
+
+    def is_identifier_char(self, char):
+        return char.isalnum() or char == '_'
+
+    def _iter_chars(self):
+        while True:
+            try:
+                yield self._get_raw()
+            except StopIteration:
+                return
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        return self.scan()
+
+    def scan(self, simple=False):
+        for char in self._iter_chars():
+            if char == '/' and ((peek := self._peek()) in ['/', '*']):
+                if peek == '/':
+                    self._find_delim('\n', advance=True)
+                else:
+                    self._find_delim('*/', advance=True)
+            elif char == '#':
+                yield Token(TokenType.PREPRO, self._lineno, None)
+            elif char == '"':
+                yield Token(TokenType.STRING, self._lineno, '"{}"'.format(self._get_string()))
+            elif not simple and char == '_' or char.isalpha():
+                yield Token(TokenType.IDENTIFIER, self._lineno, char + self._find_with_cb(self.is_identifier_char))
             else:
-                body.append(self._parse_value(is_array=True, char=next_char))
+                yield Token(TokenType.UNKNOWN, self._lineno, char)
 
-            next_char = self._get(1)
+class Parser:
+    def __init__(self, stream):
+        self._stream = stream
+        self._scanner = Scanner(stream)
 
-            if next_char not in ('}', ',', ';'):
-                raise InvalidCharacterException(expected=['}', ',', ';'], got=next_char)
+        self.defined = {}
+        self.links = []
 
-        return body
+    def _get_raw(self, include_ws=False):
+        token = next(self._scanner.scan())
 
-    def _parse_variable(self, char=None):
-        name = self._get_while(is_identifier, char=char)
+        if not include_ws and token.value.isspace():
+            return self._get_raw(include_ws)
 
-        if not name:
-            raise Exception(f'Shit needs a name bitch')
+        return token
 
-        next_char = self._get(1)
-        is_array = False
+    def _get(self, length=1, expect_typ=None, expect_val=None, **kwargs):
+        seq = [self._get_raw(**kwargs) for _ in range(length)]
 
-        if next_char == '[':
-            closing = self._get(1)
-            next_char = self._get(1)
+        if expect_typ is not None:
+            for i in range(len(expect_typ)):
+                if seq[i].type != expect_typ[i]:
+                    raise Unexpected(expected=expect_typ[i], got=seq[i].type)
 
-            if closing != ']':
-                raise InvalidCharacterException(expected=[']'], got=closing)
+        if expect_val is not None:
+            for i in range(len(expect_val)):
+                if seq[i].val != expect_val[i]:
+                    raise Unexpected(expected=expect_val[i], got=seq[i].type)
 
-            is_array = True
+        if length == 1:
+            return seq[0]
+
+        return seq
+
+    def _expect_sequence(self, typ=None, val=None, **kwargs):
+        assert None in (typ, val), '_expect_sequence: either typ or val has to be None'
         
-        if next_char != '=':
-            raise InvalidCharacterException(expected=['='], got=next_char)
+        if typ is not None:
+            for i in range(len(typ)):
+                t, _, _ = self._get(**kwargs)
 
-        value = self._parse_array() if is_array else self._parse_value()
+                if t != typ[i]:
+                    raise Unexpected(expected=typ[i], got=t)
 
-        next_char = self._get(1)
+        elif val is not None:
+            for i in range(len(val)):
+                _, _, v = self._get(**kwargs)
 
-        if next_char != ';':
-            raise InvalidCharacterException(expected=[';'], got=next_char)
+                if v != val[i]:
+                    raise Unexpected(expected=val[i], got=v)
+        else:
+            assert False, 'ok fuckhead'
 
-        return {
-            'name': name,
-            'value': value
-        }
+    def _parse_value(self, is_array=False):
+        seperators = ';,}' if is_array else ';'
 
-    def _parse_one(self, char=None):
-        char = char or self._get(1)
+        seq = ''
 
-        if char == 'c' and self._peek(4) == 'lass':
-            self._move_cursor(4)
+        _, _, v = self._get(1)
 
-            return A3Class(**self._parse_class())
-        elif is_identifier(char):
-            return A3Property(**self._parse_variable(char))
-        
-        raise InvalidCharacterException(expected=['class', 'variable'], got=char)
+        if v == '{':
+            seq = self._parse_value(True)
+
+            _, _, v = self._get(1)
+        else:
+            while v not in seperators:
+                seq += v
+                _, _, v = self._get(1, include_ws=True)
+
+            if not is_array: return seq
+
+        seq = [seq]
+
+        if v in ';,':
+            return seq + self._parse_value(True)
+
+        return seq
+
+    def _parse_one(self, token=None):
+        t, ln, val = token or self._get(1)
+
+        if t == TokenType.IDENTIFIER:
+            if val == 'class':
+                _, _, name = self._get(1, expect_typ=[TokenType.IDENTIFIER])
+                _, _, v = self._get(1, expect_typ=[TokenType.UNKNOWN])
+
+                if v == ':':
+                    inherits, opener = self._get(2, expect_typ=[TokenType.IDENTIFIER, TokenType.UNKNOWN])
+
+                    inherits, opener = inherits.value, opener.value
+                else:
+                    inherits, opener = None, v
+
+                if opener != '{': raise Unexpected(expected=['{'], got=v)
+
+                body = []
+                token = self._get(1)
+
+                while not (token.type == TokenType.UNKNOWN and token.value == '}'):
+                    body.append(next(self._parse_one(token)))
+                    token = self._get(1)
+
+                self._expect_sequence(val=';')
+
+                yield A3Class(name, inherits, body)
+            else:
+                _, _, next_val = self._get(1, expect_typ=[TokenType.UNKNOWN])
+                is_array = False
+
+                if next_val == '[':
+                    self._expect_sequence(val=[']', '=', '{'])
+                    
+                    is_array = True
+                elif next_val != '=':
+                    raise Unexpected(expected=['='], got=next_val)
+
+                yield A3Property(val, self._parse_value(is_array))
+        elif t == TokenType.UNKNOWN and val == ';':
+            yield from self._parse_one()
+        else:
+            raise Unexpected(expected=[TokenType.IDENTIFIER], got=t)
 
     def parse(self):
-        try:
-            yield self._parse_one()
+        while True:
+            try:
+                yield next(self._parse_one())
+            except RuntimeError:
+                return
 
-            self.parse()
-        except:
-            raise
 
 if __name__ == '__main__':
-    with open(Path.cwd().joinpath('config.githide.cfg')) as fp:
-        p = Parser(fp)
+    import json
 
-        for i in p.parse():
-            print(i)
+    with open(Path.cwd().joinpath('config.githide.cfg')) as fp, open(Path.cwd().joinpath('config.githide.json'), 'w') as jp:
+        parser = Parser(fp)
+
+        """ for i in parser.parse():
+            print(i) """
+
+        json.dump(to_dict(list(parser.parse())), jp, indent=4)
