@@ -113,6 +113,9 @@ class A3Property:
             if value and value[0] == '"' and value[-1] == '"':
                 value = value[1:len(value) - 1]
 
+            if boolean := next((x for x in ('true', 'false') if x == value), None) is not None:
+                return boolean
+
             try:
                 new_val = float(value)
 
@@ -412,19 +415,7 @@ class Parser(metaclass=ParserFactory):
 if __name__ == '__main__':
     import json
 
-    with open(Path.cwd().joinpath('config.githide.json'), 'w') as jp:
-        parser = Parser(Path.cwd().joinpath('config.githide.cfg'))
-        p1 = Parser(Path.cwd().joinpath('config.githide.cfg'))
+    parser = Parser(Path.cwd().joinpath('cfgitems.githide.hpp'))
 
-        bitch = list(parser.parse())
-
-        with open(Path.cwd().joinpath('output.githide.hpp'), 'w') as fp:
-            for i in encode(bitch):
-                fp.write(i)
-                #if i == ';':
-                    #fp.write('\n')
-
-        json.dump(to_dict(bitch), jp, indent=4)
-
-        print(bitch[-2]['Mission_1']['template'])
-        print(parser is p1)
+    with open('output.githide.json', 'w') as fp:
+        json.dump(to_dict(list(parser.parse())), fp, indent=4)
