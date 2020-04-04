@@ -1,5 +1,5 @@
 
-import enum, functools, collections
+import os, enum, functools, collections
 
 from pathlib import Path
 from typing import (
@@ -65,6 +65,9 @@ class A3Property:
     def __init__(self, name, value):
         self.name = name
         self.value = self._process_value(value)
+
+    def __str__(self):
+        return str(self.value)
 
     def _process_value(self, value):
         if isinstance(value, list):
@@ -221,7 +224,20 @@ class Scanner:
             else:
                 yield Token(TokenType.UNKNOWN, self._lineno, char)
 
-class Parser:
+class ParserFactory(type):
+    instances = {}
+
+    def __call__(cls, file):
+        fspath = os.fspath(file)
+
+        if fspath in cls.instances:
+            return cls.instances[fspath]
+
+        cls.instances[fspath] = Parser.open_file(file)
+
+        return cls.instances[fspath]
+
+class Parser(metaclass=ParserFactory):
     def __init__(self, stream):
         self._stream = stream
         self._scanner = Scanner(stream)
@@ -346,18 +362,28 @@ class Parser:
     def parse(self):
         while True:
             try:
-                yield next(self._parse_one())
+                yield from self._parse_one()
             except RuntimeError:
                 return
 
+    @classmethod
+    def open_file(cls, file, *args, **kwargs):
+        with open(file) as fp:
+            self = super().__new__(cls)
+            self.__init__(fp, *args, **kwargs)
+
+            return self
 
 if __name__ == '__main__':
     import json
 
-    with open(Path.cwd().joinpath('config.githide.cfg')) as fp, open(Path.cwd().joinpath('config.githide.json'), 'w') as jp:
-        parser = Parser(fp)
+    with open(Path.cwd().joinpath('config.githide.json'), 'w') as jp:
+        parser = Parser(Path.cwd().joinpath('config.githide.cfg'))
+        p1 = Parser(Path.cwd().joinpath('config.githide.cfg'))
 
-        """ for i in parser.parse():
-            print(i) """
+        bitch = list(parser.parse())
 
-        json.dump(to_dict(list(parser.parse())), jp, indent=4)
+        json.dump(to_dict(bitch), jp, indent=4)
+
+        print(bitch[-2]['Mission_1']['template'])
+        print(parser is p1)
