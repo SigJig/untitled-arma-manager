@@ -1,5 +1,5 @@
 
-import os, enum, functools, collections
+import re, os, enum, functools, collections
 
 from pathlib import Path
 from typing import (
@@ -22,6 +22,10 @@ def to_dict(data):
             dict_[i.name] = i.value
 
     return dict_
+
+def encode(data):
+    for i in data:
+        yield from i.encode()
 
 class A3Class:
     def __init__(self, name, inherits, body):
@@ -53,6 +57,17 @@ class A3Class:
 
             return self.inherits.__getattr__(item)
 
+    def encode(self):
+        yield f'class {self.name}'
+
+        if self.inherits:
+            yield f': {self.inherits.name}'
+
+        yield '{'
+        yield from encode(self.body)
+
+        yield '};'
+
     def __repr__(self):
         if self.body:
             body = ';'.join([str(x) for x in self.body]) + ';'
@@ -68,6 +83,26 @@ class A3Property:
 
     def __str__(self):
         return str(self.value)
+
+    def encode_value(self, value):
+        if isinstance(value, list):
+            yield '{'
+            yield ','.join([y for x in value for y in self.encode_value(x)])
+            yield '}'
+        elif isinstance(value, str):
+            yield '"%s"' % re.sub(r'"', '""', value)
+        else:
+            yield str(value)
+
+    def encode(self):
+        yield self.name
+
+        if isinstance(self.value, list):
+            yield '[]'
+
+        yield '='
+        yield from self.encode_value(self.value)
+        yield ';'
 
     def _process_value(self, value):
         if isinstance(value, list):
@@ -215,7 +250,7 @@ class Scanner:
                     self._find_delim('\n', advance=True)
                 else:
                     self._find_delim('*/', advance=True)
-            elif char == '#':
+            elif char == '#' and not self.line[:self._cursor].strip():
                 yield Token(TokenType.PREPRO, self._lineno, None)
             elif char == '"':
                 yield Token(TokenType.STRING, self._lineno, '"{}"'.format(self._get_string()))
@@ -382,6 +417,12 @@ if __name__ == '__main__':
         p1 = Parser(Path.cwd().joinpath('config.githide.cfg'))
 
         bitch = list(parser.parse())
+
+        with open(Path.cwd().joinpath('output.githide.hpp'), 'w') as fp:
+            for i in encode(bitch):
+                fp.write(i)
+                #if i == ';':
+                    #fp.write('\n')
 
         json.dump(to_dict(bitch), jp, indent=4)
 
