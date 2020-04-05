@@ -173,8 +173,11 @@ class Scanner:
         line_length = len(self.line)
 
         if self._cursor >= line_length:
-            self._cursor -= line_length
             self._lineno += 1
+            self._cursor = max(self._cursor - line_length, 0)
+        elif self._cursor < 0:
+            self._lineno = max(self._lineno - 1, 0)
+            self._cursor = max(len(self.line) - abs(self._cursor), 0)
 
         if self._lineno >= len(self._lines):
             raise StopIteration
@@ -184,7 +187,7 @@ class Scanner:
     def _peek(self, length=1):
         line_length = len(self.line)
 
-        if self._cursor + length >= line_length:
+        if self._cursor + length > line_length:
             remainder = self._cursor + length - line_length
             seq = ''
 
@@ -207,7 +210,10 @@ class Scanner:
     def _get_raw(self, length=1):
         seq = self._peek(length)
 
-        self._advance(length)
+        try:
+            self._advance(length)
+        except StopIteration:
+            pass
 
         return seq
 
@@ -234,6 +240,7 @@ class Scanner:
 
         if not advance:
             self._advance(-length)
+
 
         return seq
 
@@ -517,14 +524,18 @@ class Parser(metaclass=ParserFactory):
 if __name__ == '__main__':
     import json
 
-    """ parser = Parser(Path.cwd().joinpath('config.githide.cfg'))
+    parser = Parser(Path.cwd().joinpath('config.githide.cfg'))
 
     with open('output.githide.json', 'w') as fp:
         json.dump(to_dict(list(parser.parse())), fp, indent=4)
 
-    print(parser.defined) """
+    print(parser.defined) 
 
-    with open(Path.cwd().joinpath('config.githide.cfg')) as fp:
+    """with open(Path.cwd().joinpath('config.githide.cfg')) as fp:
         scanner = Scanner(fp)
 
-        for _ in range(30): print(next(scanner.scan()))
+        for _ in range(30):
+            try:
+                print(next(scanner.scan()))
+            except StopIteration:
+                break"""
