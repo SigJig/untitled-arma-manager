@@ -367,7 +367,7 @@ class Parser(metaclass=ParserFactory):
         else:
             assert False, 'ok fuckhead'
 
-    def _if_def(self, is_defined):
+    def _if_def(self, is_defined, is_else=False):
         token = self._get(1)
 
         while True:
@@ -378,7 +378,10 @@ class Parser(metaclass=ParserFactory):
                     self._get(1)
                     
                     if cmd == 'else':
-                        yield from self._if_def(not is_defined)
+                        if not is_else:
+                            yield from self._if_def(not is_defined, is_else=True)
+                        else:
+                            raise Unexpected(expected=['endif'], got=cmd)
 
                     return
 
