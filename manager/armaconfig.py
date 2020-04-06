@@ -340,8 +340,8 @@ class Parser(metaclass=ParserFactory):
 
         if expect_val is not None:
             for i in range(len(expect_val)):
-                if seq[i].val != expect_val[i]:
-                    raise Unexpected(expected=expect_val[i], got=seq[i].type)
+                if seq[i].value != expect_val[i]:
+                    raise Unexpected(expected=expect_val[i], got=seq[i].value)
 
         if length == 1:
             return seq[0]
@@ -397,10 +397,10 @@ class Parser(metaclass=ParserFactory):
 
         _, _, v = self._get(1)
 
-        if v == '{':
-            seq = self._parse_value(True)
+        if v == '{' and is_array:
+            seq = self._parse_value(is_array)
 
-            _, _, v = self._get(1)
+            _, _, v = self._get(1, expect_typ=[TokenType.UNKNOWN])
         else:
             while v not in seperators:
                 seq += v
@@ -411,9 +411,17 @@ class Parser(metaclass=ParserFactory):
         seq = [seq]
 
         if v in ';,':
-            return seq + self._parse_value(True)
+            return seq + self._parse_value(is_array)
 
         return seq
+
+    def _parse_array(self):
+        self._expect_sequence(val='{')
+
+        val = self._parse_value(True)
+        self._expect_sequence(val=';')
+
+        return val
 
     def _parse_one(self, token=None):
         t, ln, val = token or self._get(1)
@@ -424,9 +432,7 @@ class Parser(metaclass=ParserFactory):
                 _, _, v = self._get(1, expect_typ=[TokenType.UNKNOWN])
 
                 if v == ':':
-                    inherits, opener = self._get(2, expect_typ=[TokenType.IDENTIFIER, TokenType.UNKNOWN])
-
-                    inherits, opener = inherits.value, opener.value
+                    inherits, opener = (x.value for x in self._get(2, expect_typ=[TokenType.IDENTIFIER, TokenType.UNKNOWN]))
                 else:
                     inherits, opener = None, v
 
@@ -447,13 +453,13 @@ class Parser(metaclass=ParserFactory):
                 is_array = False
 
                 if next_val == '[':
-                    self._expect_sequence(val=[']', '=', '{'])
+                    self._expect_sequence(val=[']', '='])
                     
                     is_array = True
                 elif next_val != '=':
                     raise Unexpected(expected=['='], got=next_val)
 
-                yield A3Property(val, self._parse_value(is_array))
+                yield A3Property(val, self._parse_array() if is_array else self._parse_value())
         elif t == TokenType.UNKNOWN and val == ';':
             yield from self._parse_one()
         elif t == TokenType.PREPRO:
@@ -472,7 +478,7 @@ class Parser(metaclass=ParserFactory):
                         if comma.value not in '),':
                             raise Unexpected(expected=['),'], got=comma.value)
                         
-                        args.append(argument.name)
+                        args.append(argument.value)
                         nxt = comma.value
 
                     _, _, nxt = self._get(1, include_ws=True)
@@ -508,7 +514,7 @@ class Parser(metaclass=ParserFactory):
             else:
                 raise Unexpected(expected=[TokenType.PREPRO], got=command)
         else:
-            raise Unexpected(expected=[TokenType.IDENTIFIER, TokenType.PREPRO], got=t)
+            raise Unexpected(expected=[TokenType.IDENTIFIER, TokenType.PREPRO], got=(t, ln, val))
 
     def parse(self):
         while True:
