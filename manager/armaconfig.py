@@ -222,7 +222,7 @@ class Scanner:
         length = len(delim)
 
         while self._peek(length) != delim:
-            seq += self._get_raw(length)
+            seq += self._get_raw(1)
 
         if advance:
             self._advance(length)
@@ -375,14 +375,15 @@ class Parser(metaclass=ParserFactory):
                 t, _, cmd = self._peek(1)
 
                 if t == TokenType.IDENTIFIER and cmd in ('else', 'endif'):
+                    self._get(1)
+                    
                     if cmd == 'else':
                         yield from self._if_def(not is_defined)
-                        token = self._get(1)
-                        continue
-                    else:
-                        return
 
-            yield from self._parse_one(token)
+                    return
+
+            if is_defined:
+                yield from self._parse_one(token)
 
             token = self._get(1)
 
