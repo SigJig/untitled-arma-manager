@@ -326,8 +326,11 @@ class Parser(metaclass=ParserFactory):
 
         return self._scanners[-1]
 
-    def next_token(self):
+    def next_token(self, preprocessed=False):
         try:
+            if preprocessed and self._proc_buf:
+                return self._proc_buf.pop(0)
+
             return next(self.scanner.scan())
         except StopIteration:
             if self._scanner_idx < 1:
@@ -345,21 +348,21 @@ class Parser(metaclass=ParserFactory):
 
         token = self._get_raw(**getter_args)
 
-        self._proc_buf.extend(self._preprocess(token))
+        self._proc_buf.extend(list(self._preprocess(token)))
 
         return self._get_preprocessed(**getter_args)
 
     def _get_raw(self, include_ws=False):
         token = (self._buf and self._buf.pop(0)) or self.next_token()
 
-        if not include_ws and token.value.isspace():
+        if not include_ws and token.type == TokenType.UNKNOWN and token.value.isspace():
             return self._get_raw(include_ws)
         
         return token
 
-    def _peek(self, length=1):
+    def _peek(self, length=1, **kwargs):
         for _ in range(length):
-            self._buf.append(self.next_token())
+            self._buf.append(self.next_token(**kwargs))
 
         if len(self._buf) == 1:
             return self._buf[0]
@@ -407,6 +410,7 @@ class Parser(metaclass=ParserFactory):
 
     def _preprocess(self, token, **getter_args):
         t, _, val = token
+        #print(token)
 
         if t != TokenType.PREPRO:
             if t == TokenType.IDENTIFIER and val in self.defined:
@@ -433,7 +437,7 @@ class Parser(metaclass=ParserFactory):
             else:
                 yield token
         else:
-            _, _, command = self._get(1, preprocessed=False)
+            _, _, command = cmd_token = self._get(1, preprocessed=False)
 
             if command == 'include':
                 _, _, path = self._get(1, preprocessed=False, expect_typ=[TokenType.STRING])
@@ -447,12 +451,12 @@ class Parser(metaclass=ParserFactory):
             elif command == 'define':
                 _, _, name = self._get(1, preprocessed=False, expect_typ=[TokenType.IDENTIFIER])
                 
-                nxt = self._get(1, include_ws=True)
+                nxt = self._get(1, preprocessed=False, include_ws=True)
                 args = []
 
                 if nxt.value == '(':
                     while nxt.value != ')':
-                        argument, comma = self._get(2, expect_typ=[TokenType.IDENTIFIER, TokenType.UNKNOWN])
+                        argument, comma = self._get(2, preprocessed=False, expect_typ=[TokenType.IDENTIFIER, TokenType.UNKNOWN])
 
                         if comma.value not in '),':
                             raise Unexpected(expected=[')', ','], got=comma.value)
@@ -460,7 +464,7 @@ class Parser(metaclass=ParserFactory):
                         args.append(argument.value)
                         nxt = comma
 
-                    nxt = self._get(1, include_ws=True)
+                    nxt = self._get(1, preprocessed=False, include_ws=True)
 
                 tokens = []
                 while True:
@@ -471,7 +475,7 @@ class Parser(metaclass=ParserFactory):
                     else:
                         tokens.append(nxt)
 
-                    nxt = self._get(1, include_ws=True)
+                    nxt = self._get(1, preprocessed=False, include_ws=True)
 
                 self.defined[name] = DefineStatement(name, args, tokens)
             elif command in ['ifdef', 'ifndef']:
@@ -480,37 +484,45 @@ class Parser(metaclass=ParserFactory):
                 is_defined = identifier in self.defined
 
                 if command == 'ifdef':
-                    return self._if_def(is_defined)
+                    gen = self._if_def(is_defined)
                 else:
-                    return self._if_def(not is_defined)
+                    gen = self._if_def(not is_defined)
+
+                for token in gen:
+                    yield from self._preprocess(token)
+
             elif command == 'undef':
                 _, _, identifier = self._get(1, preprocessed=False, expect_typ=[TokenType.IDENTIFIER])
 
                 if identifier in self.defined:
                     del self.defined[identifier]
             else:
-                pass# raise Unexpected(expected=['define', 'ifdef', 'undef', 'include', 'ifndef'], got=command)
+                yield token
+                yield cmd_token
 
     def _if_def(self, is_defined, is_else=False):
-        token = self._get(1)
+        token = self._get(1, preprocessed=False)
 
         while True:
             if token.type == TokenType.PREPRO:
-                t, _, cmd = self._peek(1)
+                t, _, cmd = self._peek(1, preprocessed=True)
 
                 if t == TokenType.IDENTIFIER and cmd in ('else', 'endif'):
-                    self._get(1)
+                    self._get(1, preprocessed=False)
                     
                     if cmd == 'else':
                         if not is_else:
-                            return self._if_def(not is_defined, is_else=True)
+                            yield from self._if_def(not is_defined, is_else=True)
                         else:
                             raise Unexpected(expected=['endif'], got=cmd)
 
-            if is_defined:
-                yield from self._parse_one(token)
+                    return
 
-            token = self._get(1)
+            if is_defined:
+                yield token
+
+            token = self._get(1, preprocessed=False)
+        
 
     def _parse_value(self, is_array=False):
         seperators = ';,}' if is_array else ';'
