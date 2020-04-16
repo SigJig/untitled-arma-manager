@@ -21,6 +21,16 @@ class Token(_Token):
     def __iter__(self):
         return iter((self.type, self.value))
 
+    def _asdict(self):
+        return {f: getattr(self, f) for f in self._fields}
+
+    @classmethod
+    def from_token(cls, token, *args, **kwargs):
+        td = token._asdict()
+        td.update(**kwargs)
+
+        return cls(*args, **kwargs)
+
 class Scanner:
     def __init__(self, unit):
         if isinstance(unit, (str, os.PathLike)):

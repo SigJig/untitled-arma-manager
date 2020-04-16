@@ -6,22 +6,118 @@ from .scanner import Scanner, Token, TokenType
 from .exceptions import UnexpectedType, UnexpectedValue
 from .configtypes import A3Class, A3Property
 
+class TokenIterator:
+    def __init__(self, tokens):
+        self._tokens = tokens
+        self._buf = []
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        return self.get(1)
+
+    def get(self, length, expect_type=None, expect_value=None, *args, **kwargs):
+        buf_len =  len(self._buf)
+        seq = self._buf[:length]
+
+        del self._buf[:length]
+
+        if length > buf_len:
+            for _ in range(length - buf_len):
+                try:
+                    seq.append(self._next_token(*args, **kwargs))
+                except StopIteration:
+                    break
+
+        if len(seq) == 1:
+            return seq[0]
+
+        return seq
+
+    def discard(self, length):
+        try:
+            for _ in range(length): self._next_token()
+        except StopIteration:
+            pass
+
+    def peek(self, length, *args, **kwargs):
+        buf_len = len(self._buf)
+
+        if length >= buf_len:
+            for _ in range(length - buf_len):
+                try:
+                    self._buf.append(self._next_token(*args, **kwargs))
+                except StopIteration:
+                    break
+
+        seq = self._buf[:length]
+
+        if len(seq) == 1:
+            return seq[0]
+
+        return seq
+
+    def _next_token(self):
+        if self._buf: return self._buf.pop(0)
+
+        return next(self._tokens)
+
 class DefineStatement:
-    def __init__(self, name, args, tokens):
+    def __init__(self, parser, name, args, tokens):
+        self.parser = parser
         self.name = name
         self.args = args
-        self.tokens = tokens
+        self.tokens = TokenIterator(tokens)
+
+    def __call__(self, *args):
+        expect, got = len(self.args), len(args)
+
+        if expect != got:
+            raise TypeError(f'Expected {expect} positional arguments, got {got}')
         
-    def __call__(self):
-        return iter(self.tokens)
+        for index, token in enumerate(self.tokens):
+            type_, value = token
+
+            if type_ == TokenType.IDENTIFIER:
+                new_token = Token.from_token(token, value=token.value)
+
+                while True:
+                    if all(
+                            (x.type == TokenType.UNKNOWN and x.value == '#')
+                            for x in self.tokens.peek(2)
+                        ):
+                        
+                        self.tokens.discard(2)
+
+                        new_token.value += self.tokens.get(1, expect_type=[TokenType.IDENTIFIER])
+                    else:
+                        break
+
+                yield new_token
+            elif type_ == TokenType.UNKNOWN and value == '#':
+                if self.tokens.peek(1)[0].value == '#':
+                    raise UnexpectedValue('Not # lmao', '#')
+                
+                nxt = self.tokens.get(1, expect_type=[TokenType.IDENTIFIER])
+                arg_names = [x.value for x in self.args]
+
+                if not nxt.value in arg_names:
+                    raise UnexpectedValue(arg_names, nxt.value)
+
+                arg = args[arg_names.index(nxt.value)]
+
+                yield Token.from_token(arg, type=TokenType.STRING, value=str(arg.value))
 
     def __repr__(self):
-        return str(list(self()))
+        return f'{type(self).__name__}: {self.name}({",".join(self.args)})'
 
 class Parser:
     def __init__(self, unit):
         self._scanners = []
         self._make_scanner(unit)
+
+        self.tokens = TokenIterator(self._iter_tokens)
 
         self._buf = []
         self._proc_buf = []
@@ -32,6 +128,14 @@ class Parser:
     @property
     def scanner(self):
         return self._scanners[-1]
+
+    def _iter_tokens(self):
+        while True:
+            try:
+                yield from self.scanner.scan()
+            except (StopIteration, IndexError):
+                if len(self._scanners) <= 0:
+                    raise StopIteration
 
     def _make_scanner(self, unit):
         self._scanners.append(Scanner(unit))
@@ -58,26 +162,25 @@ class Parser:
 
         token = self._get_raw(**getter_args)
 
-        self._proc_buf.extend(list(self._preprocess(token)))
+        if token.type == TokenType.IDENTIFIER:
+            try:
+                g = self._process_defined(token)
+            except UnexpectedValue:
+                return token
+            else:
+                self._proc_buf.extend(g)
+        else:
+            self._proc_buf.extend(self._preprocess(token))
 
         return self._get_preprocessed(**getter_args)
 
-    def _get_raw(self, include_ws=False):
-        token = (self._buf and self._buf.pop(0)) or self.next_token()
+    def _get_raw(self, include_ws=False, buf=True):
+        token = (buf and self._buf and self._buf.pop(0)) or self.next_token()
 
         if not include_ws and token.type == TokenType.UNKNOWN and token.value.isspace():
             return self._get_raw(include_ws)
         
         return token
-
-    def _peek(self, length=1, **kwargs):
-        for _ in range(length):
-            self._buf.append(self.next_token(**kwargs))
-
-        if len(self._buf) == 1:
-            return self._buf[0]
-
-        return self._buf
 
     def _get(self, length=1, expect_typ=None, expect_val=None, preprocessed=True, **kwargs):
         getter = self._get_preprocessed if preprocessed else self._get_raw
@@ -118,110 +221,112 @@ class Parser:
         else:
             assert False, 'ok fuckhead'
 
+    def _process_defined(self, token):
+        t, v = token
+
+        if t != TokenType.IDENTIFIER:
+            raise UnexpectedType(TokenType.IDENTIFIER, token)
+        elif v not in self.defined:
+            raise UnexpectedValue(self.defined.keys(), token)
+
+        args = []
+        func = self.defined[v]
+
+        if self._peek().value == '(':
+            self._get(1) # Discard the first '('
+
+            nxt, delim = self._get_until(',)')
+
+            while delim.value != ')':
+                args.append(nxt)
+
+                nxt, delim = self._get_until(',)')
+            args.append(nxt)
+
+        print(args)
+
+        return func(*args)
+
     def _preprocess(self, token, **getter_args):
         t, val = token
-        #print(token)
 
         if t != TokenType.PREPRO:
-            if t == TokenType.IDENTIFIER and val in self.defined:
-                func = self.defined[val]
-                args = []
+            yield token
 
-                if self._peek().value == '(':
-                    self._get(1)
+            return
 
-                    nxt = self._get(1)
+        _, command = cmd_token = self._get(1, preprocessed=False)
 
-                    """ while not (nxt.type == TokenType.UNKNOWN and nxt.value == ')'):
-                        if nxt.type != TokenType.IDENTIFIER:
-                            raise Unexpected(expected=[TokenType.IDENTIFIER, TokenType.UNKNOWN], got=nxt.type)
+        if command == 'include':
+            t, path = path_token = self._get(1, preprocessed=False)
 
-                        args.append(nxt.value)
-
-                        nxt = self._get(1)
-                        if nxt.type == TokenType.UNKNOWN and nxt.value == ',':
-                            nxt = self._get(1) """
+            if t == TokenType.STRING:
+                path = path[1:-1] # Strip quotes
+            elif t != TokenType.ARROW_STRING:
+                raise UnexpectedType([TokenType.STRING, TokenType.ARROW_STRING], path_token)
                 
+            split = path.split('\\')
+            joined_path = Path.cwd()
 
-                yield from (func(*args))
-            else:
-                yield token
-        else:
-            _, command = cmd_token = self._get(1, preprocessed=False)
+            if '.' in split: raise Exception('Dots not allowed maybe idek')
 
-            if command == 'include':
-                t, path = path_token = self._get(1, preprocessed=False)
+            self._make_scanner(joined_path.joinpath(*split))
 
-                if t == TokenType.STRING:
-                    path = path[1:-1]
-                elif t != TokenType.ARROW_STRING:
-                    raise UnexpectedType([TokenType.STRING, TokenType.ARROW_STRING], path_token)
+        elif command == 'define':
+            _, name = self._get(1, preprocessed=False, expect_typ=[TokenType.IDENTIFIER])
+            
+            nxt = self._get(1, preprocessed=False, include_ws=True)
+            args = []
+
+            if nxt.value == '(':
+                while nxt.value != ')':
+                    argument, comma = self._get(2, preprocessed=False, expect_typ=[TokenType.IDENTIFIER, TokenType.UNKNOWN])
+
+                    if comma.value not in '),':
+                        raise UnexpectedValue(expected=[')', ','], got=comma)
                     
-                split = path.split('\\')
-                joined_path = Path.cwd()
+                    args.append(argument.value)
+                    nxt = comma
 
-                if '.' in split: raise Exception('Dots not allowed maybe idek')
-
-                self._make_scanner(joined_path.joinpath(*split))
-
-            elif command == 'define':
-                _, name = self._get(1, preprocessed=False, expect_typ=[TokenType.IDENTIFIER])
-                
                 nxt = self._get(1, preprocessed=False, include_ws=True)
-                args = []
 
-                if nxt.value == '(':
-                    while nxt.value != ')':
-                        argument, comma = self._get(2, preprocessed=False, expect_typ=[TokenType.IDENTIFIER, TokenType.UNKNOWN])
-
-                        if comma.value not in '),':
-                            raise UnexpectedValue(expected=[')', ','], got=comma)
-                        
-                        args.append(argument.value)
-                        nxt = comma
-
-                    nxt = self._get(1, preprocessed=False, include_ws=True)
-
-                tokens = []
-                while True:
-                    if nxt.value == '\\':
-                        self._expect_sequence(val='\n')
-                    elif nxt.value == '\n':
-                        break
-                    else:
-                        tokens.append(nxt)
-
-                    nxt = self._get(1, preprocessed=False, include_ws=True)
-
-                self.defined[name] = DefineStatement(name, args, tokens)
-            elif command in ['ifdef', 'ifndef']:
-                _, identifier = self._get(1, preprocessed=False, expect_typ=[TokenType.IDENTIFIER])
-
-                is_defined = identifier in self.defined
-
-                if command == 'ifdef':
-                    gen = self._if_def(is_defined)
+            tokens = []
+            while True:
+                if nxt.value == '\\':
+                    self._expect_sequence(val='\n')
+                elif nxt.value == '\n':
+                    break
                 else:
-                    gen = self._if_def(not is_defined)
+                    tokens.append(nxt)
 
-                for token in gen:
-                    yield from self._preprocess(token)
+                nxt = self._get(1, preprocessed=False, include_ws=True)
 
-            elif command == 'undef':
-                _, identifier = self._get(1, preprocessed=False, expect_typ=[TokenType.IDENTIFIER])
+            self.defined[name] = DefineStatement(self, name, args, tokens)
+        elif command in ['ifdef', 'ifndef']:
+            _, identifier = self._get(1, preprocessed=False, expect_typ=[TokenType.IDENTIFIER])
 
-                if identifier in self.defined:
-                    del self.defined[identifier]
+            is_defined = identifier in self.defined
+
+            if command == 'ifdef':
+                gen = self._if_def(is_defined)
             else:
-                yield token
-                yield cmd_token
+                gen = self._if_def(not is_defined)
+
+            for token in gen:
+                yield from self._preprocess(token)
+
+        elif command == 'undef':
+            _, identifier = self._get(1, preprocessed=False, expect_typ=[TokenType.IDENTIFIER])
+
+            if identifier in self.defined:
+                del self.defined[identifier]
 
     def _if_def(self, is_defined, is_else=False):
         token = self._get(1, preprocessed=False)
 
         while True:
             if token.type == TokenType.PREPRO:
-                t, cmd = peeked = self._peek(1, preprocessed=True)
+                t, cmd = peeked = self._peek(1)
 
                 if t == TokenType.IDENTIFIER and cmd in ('else', 'endif'):
                     self._get(1, preprocessed=False)
@@ -238,37 +343,44 @@ class Parser:
                 yield token
 
             token = self._get(1, preprocessed=False)
-        
 
-    def _parse_value(self, is_array=False):
-        seperators = ';,}' if is_array else ';'
+    def _get_until(self, delim=';', token=None, **kwargs):
+        seq = []
+        token = token or self._get(1, include_ws=True, **kwargs)
 
-        seq = ''
+        while token.value not in delim:
+            seq.append(token)
 
-        _, v = self._get(1)
+            token = self._get(1, include_ws=True, **kwargs)
 
-        if v == '{' and is_array:
-            seq = self._parse_value(is_array)
+        return seq, token
 
-            _, v = self._get(1, expect_typ=[TokenType.UNKNOWN])
-        else:
-            while v not in seperators:
-                seq += v
-                _, v = self._get(1, include_ws=True)
-
-            if not is_array: return seq
-
-        seq = [seq]
-
-        if v in ';,':
-            return seq + self._parse_value(is_array)
-
-        return seq
+    def _parse_value(self, sep=';', token=None):
+        return ''.join([x.value for x in self._get_until(sep, token)[0]])
 
     def _parse_array(self):
-        self._expect_sequence(val='{')
+        def __parse():
+            seq = []
+            seperators = ';,}'
+            _, v = token = self._get(1)
 
-        val = self._parse_value(True)
+            if v == '{':
+                seq.append(__parse())
+
+                s = self._get(1)
+            else:
+                val, s = self._get_until(seperators, token)
+                seq.append(''.join([x.value for x in val]))
+
+            if s.value in ',;':
+                return seq + __parse()
+
+            return seq
+
+        self._expect_sequence(val='{')
+        
+        val = __parse()
+
         self._expect_sequence(val=';')
 
         return val

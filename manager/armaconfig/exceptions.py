@@ -6,7 +6,9 @@ from .scanner import Token, TokenType
 def format_expected(e, got, token):
     return 'Expected %s, got %s (%s)' % (e, got, token)
 
-class UnexpectedType(TypeError):
+class Unexpected: pass
+
+class UnexpectedType(TypeError, Unexpected):
     def __init__(self, expected: Union[TokenType, Sequence[TokenType]], got: Token):
         if isinstance(expected, (list, tuple)):
             expected = '<%s>' % (' | '.join(expected))
@@ -17,7 +19,7 @@ class UnexpectedType(TypeError):
 
         super().__init__(message)
 
-class UnexpectedValue(ValueError):
+class UnexpectedValue(ValueError, Unexpected):
     def __init__(self, expected: Any, got: Token):
         message = format_expected(repr(expected), repr(got.value), repr(got))
 

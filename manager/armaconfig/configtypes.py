@@ -94,16 +94,19 @@ class A3Property:
         yield ';'
 
     def _process_value(self, value):
+        #value = [x.value if hasattr(x, 'value') else x for x in value]
+        #exit()
+
         if isinstance(value, list):
-            return [self._process_value(x) for x in value if not isinstance(x, str) or x.strip()]
+            return [self._process_value(x) for x in value if (isinstance(x, list) or not isinstance(x, str) or x.strip())]
         else:
             value = value.strip()
 
-            if value and value[0] == '"' and value[-1] == '"':
-                value = value[1:len(value) - 1]
-
             if boolean := next((x for x in ('true', 'false') if x == value), None) is not None:
                 return boolean
+
+            if value and value[0] == '"' and value[-1] == '"':
+                value = value[1:len(value) - 1]
 
             try:
                 new_val = float(value)
