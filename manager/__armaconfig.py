@@ -17,13 +17,17 @@ if __name__ == '__main__':
     parser = Parser(Path.cwd().joinpath('config.githide.cfg'))
 
     with open('output.githide.json', 'w') as fp:
-        parsed = list(parser.parse())
+        parsed = []
+        for i in parser.parse():
+            print(i)
+            parsed.append(i)
+
         dictified = to_dict(parsed)
 
         print(dictified)
         json.dump(dictified, fp, indent=4)
 
-    print(parser.defined) 
+    print(parser._stream.defined) 
 
     """with open(Path.cwd().joinpath('config.githide.cfg')) as fp:
         scanner = Scanner(fp)

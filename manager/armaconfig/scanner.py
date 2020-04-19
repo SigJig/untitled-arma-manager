@@ -29,7 +29,8 @@ class Token(_Token):
         td = token._asdict()
         td.update(**kwargs)
 
-        return cls(*args, **kwargs)
+        return cls(*args, **td)
+
 
 class Scanner:
     def __init__(self, unit):
