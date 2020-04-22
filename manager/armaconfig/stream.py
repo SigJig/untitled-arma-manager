@@ -54,7 +54,7 @@ class DefineStatement:
     def __init__(self, preprocessor, name, args, tokens):
         self.name = name
         self.args = args
-        self.tokens = TokenStream(tokens)
+        self.tokens = TokenStream(tokens, iter_include_ws=True)
         self.preprocessor = preprocessor
 
     def __call__(self, *args):
@@ -79,14 +79,14 @@ class DefineStatement:
 
                 while True:
                     try:
-                        t, v = self.tokens.peek(1)
+                        t, v = self.tokens.peek(1, include_ws=True)
                     except StopIteration:
                         break
 
                     if t == TokenType.DOUBLE_HASH:
                         self.tokens.discard(1)
 
-                        identifier = resolve_identifier(self.tokens.get(1, expect_type=[TokenType.IDENTIFIER]))
+                        identifier = resolve_identifier(self.tokens.get(1, include_ws=True, expect_type=[TokenType.IDENTIFIER]))
 
                         collection.extend(identifier)
                     else:
@@ -94,18 +94,9 @@ class DefineStatement:
 
                 yield collection
             elif type_ == TokenType.UNKNOWN and value == '#':
-                if self.tokens.peek(1).value == '#':
-                    raise UnexpectedValue('Not # lmao', self.tokens.get(1))
-                
-                nxt = self.tokens.get(1, expect_type=[TokenType.IDENTIFIER])
-                arg_names = [x.value for x in self.args]
+                collection = TokenCollection(self.__call__(*args), type=TokenType.STRING)
 
-                if not nxt.value in arg_names:
-                    raise UnexpectedValue(arg_names, nxt.value)
-
-                arg = args[arg_names.index(nxt.value)]
-
-                yield TokenCollection(arg)
+                yield collection
             else:
                 yield token
 
@@ -113,7 +104,7 @@ class DefineStatement:
         return f'{type(self).__name__}: {self.name}({",".join(self.args)})'
 
 class TokenStream:
-    def __init__(self, tokens=None, unit=None):
+    def __init__(self, tokens=None, unit=None, iter_include_ws=False):
         assert None in (tokens, unit) and any(x is not None for x in (tokens, unit)), (
             'Tokenstream: Exactly one of `tokens`, `unit` must be non-None'
         )
@@ -122,6 +113,7 @@ class TokenStream:
         self._buf = []
         self._scanners = []
         self._unit = unit
+        self._iter_include_ws = iter_include_ws
 
         if self._tokens is not None:
             self._iterator = iter(self._tokens)
@@ -133,7 +125,7 @@ class TokenStream:
         return self
 
     def __next__(self):
-        return self.get(1)
+        return self.get(1, include_ws=self._iter_include_ws)
 
     @property
     def scanner(self):

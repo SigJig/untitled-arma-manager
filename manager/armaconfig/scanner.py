@@ -8,8 +8,7 @@ class TokenType(enum.Enum):
     IDENTIFIER = 3
     EOL = 4
     ARROW_STRING = 5
-    COLLECTION = 6
-    DOUBLE_HASH = 7
+    DOUBLE_HASH = 6
 
 _Token = collections.namedtuple('Token', [
     'type',
@@ -37,7 +36,7 @@ class TokenCollection(list):
     # TODO: Multiple units
 
     def __init__(self, *args, **kwargs):
-        self.type = TokenType.COLLECTION
+        self.type = kwargs.pop('type', TokenType.UNKNOWN)
 
         super().__init__(*args, **kwargs)
 
@@ -198,12 +197,12 @@ class Scanner:
                     self._find_delim('\n', advance=True)
                 else:
                     self._find_delim('*/', advance=True)
-            elif char == '#' and not self.line[:self._cursor-1].strip():
-                yield self._make_token(TokenType.PREPRO, '')
             elif char == '#' and self._peek() == '#':
                 self._advance(1)
 
                 yield self._make_token(TokenType.DOUBLE_HASH, '')
+            elif char == '#' and not self.line[:self._cursor-1].strip():
+                yield self._make_token(TokenType.PREPRO, '')
             elif char == '"':
                 yield self._make_token(TokenType.STRING, '"{}"'.format(self._get_string()))
             elif char == '<':
