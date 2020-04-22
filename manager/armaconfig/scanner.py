@@ -8,6 +8,8 @@ class TokenType(enum.Enum):
     IDENTIFIER = 3
     EOL = 4
     ARROW_STRING = 5
+    COLLECTION = 6
+    DOUBLE_HASH = 7
 
 _Token = collections.namedtuple('Token', [
     'type',
@@ -31,6 +33,26 @@ class Token(_Token):
 
         return cls(*args, **td)
 
+class TokenCollection(list):
+    # TODO: Multiple units
+
+    def __init__(self, *args, **kwargs):
+        self.type = TokenType.COLLECTION
+
+        super().__init__(*args, **kwargs)
+
+    def __getattr__(self, attr):
+        if attr in ('colno', 'lineno', 'unit'):
+            try:
+                return getattr(self[0], attr)
+            except IndexError:
+                pass
+
+        raise NotImplementedError(attr)
+
+    @property
+    def value(self):
+        return ''.join([str(x.value) for x in self])
 
 class Scanner:
     def __init__(self, unit):
@@ -154,10 +176,7 @@ class Scanner:
 
     def _iter_chars(self):
         while True:
-            try:
-                yield self._get_raw()
-            except StopIteration:
-                return
+            yield self._get_raw()
 
     def __iter__(self):
         return self
@@ -181,6 +200,10 @@ class Scanner:
                     self._find_delim('*/', advance=True)
             elif char == '#' and not self.line[:self._cursor-1].strip():
                 yield self._make_token(TokenType.PREPRO, '')
+            elif char == '#' and self._peek() == '#':
+                self._advance(1)
+
+                yield self._make_token(TokenType.DOUBLE_HASH, '')
             elif char == '"':
                 yield self._make_token(TokenType.STRING, '"{}"'.format(self._get_string()))
             elif char == '<':

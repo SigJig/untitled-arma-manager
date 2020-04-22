@@ -3,7 +3,7 @@ import os, functools
 from pathlib import Path
 from typing import Union
 
-from .scanner import Scanner, TokenType, Token
+from .scanner import Scanner, TokenType, Token, TokenCollection
 from .exceptions import Unexpected, UnexpectedType, UnexpectedValue
 
 def arr_or_only(f):
@@ -17,20 +17,54 @@ def arr_or_only(f):
         return retrn
     return wrapper
 
+def process_identifier(preprocessor, stream, identifier):
+    if identifier.value in preprocessor.defined:
+        f = preprocessor.defined[identifier.value]
+        args = []
+        nxt = stream.peek(1)
+
+        if nxt.type == TokenType.UNKNOWN and nxt.value == '(':
+            stream.discard(1)
+
+            cur = TokenCollection()
+            while True:
+                nxt = stream.get(1)
+
+                if nxt.type == TokenType.UNKNOWN:
+                    if nxt.value in '),':
+                        args.append(cur)
+                        cur = TokenCollection()
+
+                        if nxt.value == ')':
+                            break
+                        else:
+                            continue
+                    else:
+                        cur.append(nxt)
+                elif nxt.type == TokenType.IDENTIFIER:
+                    cur.extend(process_identifier(preprocessor, stream, nxt))
+                else:
+                    cur.append(nxt)
+
+        yield from f(*args)
+    else:
+        yield identifier
+
 class DefineStatement:
-    def __init__(self, name, args, tokens):
+    def __init__(self, preprocessor, name, args, tokens):
         self.name = name
         self.args = args
         self.tokens = TokenStream(tokens)
+        self.preprocessor = preprocessor
 
     def __call__(self, *args):
         def resolve_identifier(identifier):
-            names = (x.value for x in self.args)
+            names = self.args
 
             if identifier.value in names:
-                return args[names.index(identifier.value)]
-
-            return identifier
+                yield args[names.index(identifier.value)]
+            else:
+                yield from process_identifier(self.preprocessor, self.tokens, identifier)
 
         expect, got = len(self.args), len(args)
 
@@ -41,28 +75,24 @@ class DefineStatement:
             type_, value = token
 
             if type_ == TokenType.IDENTIFIER:
-                new_token = Token.from_token(token, value=resolve_identifier(token).value)
+                collection = TokenCollection(resolve_identifier(token))
 
                 while True:
                     try:
-                        (lt, lv), (rt, rv) = self.tokens.peek(2)
+                        t, v = self.tokens.peek(1)
                     except StopIteration:
                         break
 
-                    if lt == TokenType.UNKNOWN and lv == '#':
-                        if rt == TokenType.UNKNOWN and rv == '#':
-                            self.tokens.discard(2)
+                    if t == TokenType.DOUBLE_HASH:
+                        self.tokens.discard(1)
 
-                            identifier = resolve_identifier(self.tokens.get(1, expect_type=[TokenType.IDENTIFIER]))
+                        identifier = resolve_identifier(self.tokens.get(1, expect_type=[TokenType.IDENTIFIER]))
 
-                            if isinstance(identifier, list):
-                                new_token.value += ''.join([x.value for x in identifier])
-                            else:
-                                new_token.value += str(identifier.value)
+                        collection.extend(identifier)
                     else:
                         break
 
-                yield new_token
+                yield collection
             elif type_ == TokenType.UNKNOWN and value == '#':
                 if self.tokens.peek(1).value == '#':
                     raise UnexpectedValue('Not # lmao', self.tokens.get(1))
@@ -75,12 +105,9 @@ class DefineStatement:
 
                 arg = args[arg_names.index(nxt.value)]
 
-                if isinstance(arg, list):
-                    val = ''.join([x.value for x in arg])
-                else:
-                    val = str(arg.value)
-
-                yield Token.from_token(arg, type=TokenType.STRING, value=val)
+                yield TokenCollection(arg)
+            else:
+                yield token
 
     def __repr__(self):
         return f'{type(self).__name__}: {self.name}({",".join(self.args)})'
@@ -232,41 +259,6 @@ class PreprocessedStream(TokenStream):
                 return
 
     def _preprocess(self, token):
-        def process_identifier(identifier):
-            if identifier.value in self.defined:
-                f = self.defined[identifier.value]
-                args = []
-                nxt = self.tokens.peek(1)
-
-                if nxt.type == TokenType.UNKNOWN and nxt.value == '(':
-                    self.tokens.discard(1)
-
-                    cur = []
-                    while True:
-                        nxt = self.tokens.get(1)
-
-                        if nxt.type == TokenType.UNKNOWN:
-                            #self.tokens.discard(1)
-
-                            if nxt.value in '),':
-                                args.append(cur)
-                                cur = []
-
-                                if nxt.value == ')':
-                                    break
-                                else:
-                                    continue
-                            else:
-                                cur.append(nxt)
-                        elif nxt.type == TokenType.IDENTIFIER:
-                            cur.extend(process_identifier(nxt))
-                        else:
-                            cur.append(nxt)
-
-                yield from f(*args)
-            else:
-                yield identifier
-
         if token.type == TokenType.PREPRO:
             _, command = cmdtoken = self.tokens.expect(types=[TokenType.IDENTIFIER])
 
@@ -278,7 +270,7 @@ class PreprocessedStream(TokenStream):
                     self.tokens.discard(1)
 
                     while True:
-                        t, v = peek = self.tokens.get(1)
+                        t, v = nxt = self.tokens.get(1)
 
                         if t == TokenType.IDENTIFIER:
                             args.append(v)
@@ -296,16 +288,16 @@ class PreprocessedStream(TokenStream):
 
                         elif t == TokenType.UNKNOWN:
                             if v != ')':
-                                raise UnexpectedValue(')', peek)
+                                raise UnexpectedValue(')', nxt)
 
                             break
                         else:
-                            raise UnexpectedType([TokenType.IDENTIFIER, TokenType.UNKNOWN], peek)
+                            raise UnexpectedType([TokenType.IDENTIFIER, TokenType.UNKNOWN], nxt)
 
-                tokens = []
+                tokens = TokenCollection()
                 while True:
                     nxt = self.tokens.get(1, include_ws=True)
-                    
+
                     if nxt.value == '\\':
                         self.tokens.expect(values=['\n'])
                     elif nxt.value == '\n':
@@ -314,7 +306,7 @@ class PreprocessedStream(TokenStream):
                         # Ignore spaces, but include tabs
                         tokens.append(nxt)
 
-                self.defined[name] = DefineStatement(name, args, tokens)
+                self.defined[name] = DefineStatement(self, name, args, tokens)
             elif command == 'include':
                 t, path = path_token = self.tokens.get(1)
 
@@ -340,12 +332,15 @@ class PreprocessedStream(TokenStream):
                                 if peek.value == 'else':
                                     if not is_else:
                                         yield from ifdef(not is_defined, is_else=True)
+                                        return
                                     else:
                                         raise UnexpectedValue(['endif'], peek)
                                 else:
                                     return
-
-                        yield token
+                            else:
+                                yield from self._preprocess(token)
+                        else:
+                            yield from self._preprocess(token)
 
                 macro = self.tokens.get(1, expect_type=[TokenType.IDENTIFIER])
                 is_defined = macro.value in self.defined
@@ -361,7 +356,7 @@ class PreprocessedStream(TokenStream):
                     del self.defined[name]
                 
         elif token.type == TokenType.IDENTIFIER:
-            yield from process_identifier(token)
+            yield from process_identifier(self, self.tokens, token)
         else:
             yield token
 
