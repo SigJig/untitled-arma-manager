@@ -6,16 +6,8 @@ from typing import Union
 from .scanner import Scanner, TokenType, Token, TokenCollection
 from .exceptions import Unexpected, UnexpectedType, UnexpectedValue
 
-def arr_or_only(f):
-    @functools.wraps(f)
-    def wrapper(*args, **kwargs) -> Union[list, TokenType]:
-        retrn = f(*args, **kwargs)
-
-        if isinstance(retrn, (tuple, list)) and len(retrn) == 1:
-            return retrn[0]
-
-        return retrn
-    return wrapper
+def only(arr):
+    return arr[0]
 
 def process_identifier(preprocessor, stream, identifier):
     if identifier.value in preprocessor.defined:
@@ -23,14 +15,14 @@ def process_identifier(preprocessor, stream, identifier):
         args = []
 
         try:
-            nxt = stream.peek(1)
+            nxt = only(stream.peek(1))
 
             if nxt.type == TokenType.UNKNOWN and nxt.value == '(':
                 stream.discard(1)
 
                 cur = TokenCollection()
                 while True:
-                    nxt = stream.get(1)
+                    nxt = only(stream.get(1))
 
                     if nxt.type == TokenType.UNKNOWN:
                         if nxt.value in '),':
@@ -83,14 +75,14 @@ class DefineStatement:
 
                 while True:
                     try:
-                        t, v = self.tokens.peek(1, include_ws=True)
+                        t, v = only(self.tokens.peek(1, include_ws=True))
                     except StopIteration:
                         break
 
                     if t == TokenType.DOUBLE_HASH:
                         self.tokens.discard(1)
 
-                        identifier = resolve_identifier(self.tokens.get(1, include_ws=True, expect_type=[TokenType.IDENTIFIER]))
+                        identifier = resolve_identifier(only(self.tokens.get(1, include_ws=True, expect_type=[TokenType.IDENTIFIER])))
 
                         collection.extend(identifier)
                     else:
@@ -129,7 +121,7 @@ class TokenStream:
         return self
 
     def __next__(self):
-        return self.get(1, include_ws=self._iter_include_ws)
+        return only(self.get(1, include_ws=self._iter_include_ws))
 
     @property
     def scanner(self):
@@ -152,7 +144,6 @@ class TokenStream:
 
         return self.scanner
 
-    @arr_or_only
     def get(self, length, expect_type=None, expect_value=None, *args, **kwargs):
         buf_len =  len(self._buf)
         seq = self._buf[:length]
@@ -171,7 +162,6 @@ class TokenStream:
         except StopIteration:
             pass
 
-    @arr_or_only
     def peek(self, length, *args, **kwargs):
         buf_len = len(self._buf)
 
@@ -185,7 +175,6 @@ class TokenStream:
 
         return self._buf[:length]
 
-    @arr_or_only
     def expect(self, values=None, types=None, **getter_args):
         assert None in (values, types) and any(x is not None for x in (values, types)), (
             'Invalid arguments: Exactly one of `values`, `types` must be non-None'
@@ -202,7 +191,7 @@ class TokenStream:
 
         seq = []
         for i in chk:
-            token = self.get(1, **getter_args)
+            token = only(self.get(1, **getter_args))
 
             if getattr(token, k) != i:
                 raise error(i, token)
@@ -245,7 +234,7 @@ class PreprocessedStream(TokenStream):
         while True:
             try:
                 if not self._buf:
-                    self._buf.extend(self._preprocess(self.tokens.get(1, include_ws=True)))
+                    self._buf.extend(self._preprocess(only(self.tokens.get(1, include_ws=True))))
 
                     if not self._buf:
                         continue
@@ -256,22 +245,22 @@ class PreprocessedStream(TokenStream):
 
     def _preprocess(self, token):
         if token.type == TokenType.PREPRO:
-            _, command = cmdtoken = self.tokens.expect(types=[TokenType.IDENTIFIER])
+            _, command = only(self.tokens.expect(types=[TokenType.IDENTIFIER]))
 
             if command == 'define':
-                _, name = self.tokens.expect(types=[TokenType.IDENTIFIER])
+                _, name = only(self.tokens.expect(types=[TokenType.IDENTIFIER]))
                 args = []
 
-                if self.tokens.peek(1).value == '(':
+                if only(self.tokens.peek(1)).value == '(':
                     self.tokens.discard(1)
 
                     while True:
-                        t, v = nxt = self.tokens.get(1)
+                        t, v = nxt = only(self.tokens.get(1))
 
                         if t == TokenType.IDENTIFIER:
                             args.append(v)
 
-                            nxt = self.tokens.peek(1)
+                            nxt = only(self.tokens.peek(1))
 
                             if nxt.type == TokenType.UNKNOWN:
                                 if nxt.value == ',':
@@ -292,7 +281,7 @@ class PreprocessedStream(TokenStream):
 
                 tokens = TokenCollection()
                 while True:
-                    nxt = self.tokens.get(1, include_ws=True)
+                    nxt = only(self.tokens.get(1, include_ws=True))
 
                     if nxt.value == '\\':
                         self.tokens.expect(values=['\n'])
@@ -304,7 +293,7 @@ class PreprocessedStream(TokenStream):
 
                 self.defined[name] = DefineStatement(self, name, args, tokens)
             elif command == 'include':
-                t, path = path_token = self.tokens.get(1)
+                t, path = path_token = only(self.tokens.get(1))
 
                 if t == TokenType.STRING:
                     if all(x == '"' for x in (path[0], path[-1])):
@@ -317,10 +306,10 @@ class PreprocessedStream(TokenStream):
             elif command in ('ifdef', 'ifndef'):
                 def ifdef(is_defined, is_else=False):
                     while True:
-                        t, _ = token = self.tokens.get(1)
+                        t, _ = token = only(self.tokens.get(1))
 
                         if t == TokenType.PREPRO:
-                            peek = self.tokens.peek(1)
+                            peek = only(self.tokens.peek(1))
 
                             if peek.type == TokenType.IDENTIFIER and peek.value in ('endif', 'else'):
                                 self.tokens.discard(1)
@@ -336,7 +325,7 @@ class PreprocessedStream(TokenStream):
                         
                         if is_defined: yield from self._preprocess(token)
 
-                macro = self.tokens.get(1, expect_type=[TokenType.IDENTIFIER])
+                macro = only(self.tokens.get(1, expect_type=[TokenType.IDENTIFIER]))
                 is_defined = macro.value in self.defined
 
                 if command == 'ifdef':
@@ -344,7 +333,7 @@ class PreprocessedStream(TokenStream):
                 else:
                     yield from ifdef(not is_defined)
             elif command in 'undef':
-                _, name = self.tokens.expect(types=[TokenType.IDENTIFIER])
+                _, name = only(self.tokens.expect(types=[TokenType.IDENTIFIER]))
 
                 if name in self.defined:
                     del self.defined[name]

@@ -7,7 +7,7 @@ from pathlib import Path
 from .scanner import Scanner, Token, TokenType, TokenCollection
 from .exceptions import UnexpectedType, UnexpectedValue
 from .configtypes import A3Class, A3Property
-from .stream import TokenStream, PreprocessedStream
+from .stream import TokenStream, PreprocessedStream, only
 
 class Parser:
     def __init__(self, unit):
@@ -15,12 +15,12 @@ class Parser:
 
     def _get_until(self, delim=';', token=None, **kwargs):
         seq = TokenCollection()
-        token = token or self._stream.get(1, include_ws=True, **kwargs)
+        token = token or only(self._stream.get(1, include_ws=True, **kwargs))
 
         while token.value not in delim:
             seq.append(token)
 
-            token = self._stream.get(1, include_ws=True, **kwargs)
+            token = only(self._stream.get(1, include_ws=True, **kwargs))
 
         return seq, token
 
@@ -28,12 +28,12 @@ class Parser:
         def __parse():
             seq = []
             seperators = ';,}'
-            _, v = token = self._stream.get(1)
+            _, v = token = only(self._stream.get(1))
 
             if v == '{':
                 seq.append(__parse())
 
-                s = self._stream.get(1)
+                s = only(self._stream.get(1))
             else:
                 coll, s = self._get_until(seperators, token)
                 seq.append(coll.value)
@@ -52,12 +52,12 @@ class Parser:
         return collection
 
     def _parse_one(self, token=None):
-        t, val = token = token or self._stream.get(1)
+        t, val = token = token or only(self._stream.get(1))
 
         if t == TokenType.IDENTIFIER:
             if val == 'class':
-                _, name = self._stream.expect(types=[TokenType.IDENTIFIER])
-                _, v = valuetoken = self._stream.expect(types=[TokenType.UNKNOWN])
+                _, name = only(self._stream.expect(types=[TokenType.IDENTIFIER]))
+                _, v = valuetoken = only(self._stream.expect(types=[TokenType.UNKNOWN]))
 
                 if v == ':':
                     inherits, opener = (x.value for x in self._stream.expect(types=[TokenType.IDENTIFIER, TokenType.UNKNOWN]))
@@ -67,17 +67,17 @@ class Parser:
                 if opener != '{': raise UnexpectedValue(expected=['{'], got=valuetoken)
 
                 body = []
-                token = self._stream.get(1)
+                token = only(self._stream.get(1))
 
                 while not (token.type == TokenType.UNKNOWN and token.value == '}'):
                     body.append(next(self._parse_one(token)))
-                    token = self._stream.get(1)
+                    token = only(self._stream.get(1))
 
                 self._stream.expect(values=[';'])
 
                 yield A3Class(name, inherits, body)
             else:
-                _, next_val = val_token = self._stream.expect(types=[TokenType.UNKNOWN])
+                _, next_val = val_token = only(self._stream.expect(types=[TokenType.UNKNOWN]))
                 is_array = False
 
                 if next_val == '[':
