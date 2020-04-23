@@ -4,7 +4,7 @@
 import os
 from pathlib import Path
 
-from .scanner import Scanner, Token, TokenType
+from .scanner import Scanner, Token, TokenType, TokenCollection
 from .exceptions import UnexpectedType, UnexpectedValue
 from .configtypes import A3Class, A3Property
 from .stream import TokenStream, PreprocessedStream
@@ -14,7 +14,7 @@ class Parser:
         self._stream = PreprocessedStream(unit=unit)
 
     def _get_until(self, delim=';', token=None, **kwargs):
-        seq = []
+        seq = TokenCollection()
         token = token or self._stream.get(1, include_ws=True, **kwargs)
 
         while token.value not in delim:
@@ -23,9 +23,6 @@ class Parser:
             token = self._stream.get(1, include_ws=True, **kwargs)
 
         return seq, token
-
-    def _parse_value(self, sep=';', token=None):
-        return ''.join([x.value for x in self._get_until(sep, token)[0]])
 
     def _parse_array(self):
         def __parse():
@@ -38,8 +35,8 @@ class Parser:
 
                 s = self._stream.get(1)
             else:
-                val, s = self._get_until(seperators, token)
-                seq.append(''.join([x.value for x in val]))
+                coll, s = self._get_until(seperators, token)
+                seq.append(coll.value)
 
             if s.value in ',;':
                 return seq + __parse()
@@ -48,11 +45,11 @@ class Parser:
 
         self._stream.expect(values=['{'])
         
-        val = __parse()
+        collection = __parse()
 
         self._stream.expect(values=[';'])
 
-        return val
+        return collection
 
     def _parse_one(self, token=None):
         t, val = token = token or self._stream.get(1)
@@ -90,7 +87,7 @@ class Parser:
                 elif next_val != '=':
                     raise UnexpectedValue(expected='=', got=val_token)
 
-                yield A3Property(val, self._parse_array() if is_array else self._parse_value())
+                yield A3Property(val, self._parse_array() if is_array else self._get_until(';')[0].value)
         elif t == TokenType.UNKNOWN and val == ';':
             return self._parse_one()
         else:
