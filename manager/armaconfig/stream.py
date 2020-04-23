@@ -21,30 +21,34 @@ def process_identifier(preprocessor, stream, identifier):
     if identifier.value in preprocessor.defined:
         f = preprocessor.defined[identifier.value]
         args = []
-        nxt = stream.peek(1)
 
-        if nxt.type == TokenType.UNKNOWN and nxt.value == '(':
-            stream.discard(1)
+        try:
+            nxt = stream.peek(1)
 
-            cur = TokenCollection()
-            while True:
-                nxt = stream.get(1)
+            if nxt.type == TokenType.UNKNOWN and nxt.value == '(':
+                stream.discard(1)
 
-                if nxt.type == TokenType.UNKNOWN:
-                    if nxt.value in '),':
-                        args.append(cur)
-                        cur = TokenCollection()
+                cur = TokenCollection()
+                while True:
+                    nxt = stream.get(1)
 
-                        if nxt.value == ')':
-                            break
+                    if nxt.type == TokenType.UNKNOWN:
+                        if nxt.value in '),':
+                            args.append(cur)
+                            cur = TokenCollection()
+
+                            if nxt.value == ')':
+                                break
+                            else:
+                                continue
                         else:
-                            continue
+                            cur.append(nxt)
+                    elif nxt.type == TokenType.IDENTIFIER:
+                        cur.extend(process_identifier(preprocessor, stream, nxt))
                     else:
                         cur.append(nxt)
-                elif nxt.type == TokenType.IDENTIFIER:
-                    cur.extend(process_identifier(preprocessor, stream, nxt))
-                else:
-                    cur.append(nxt)
+        except StopIteration:
+            pass
 
         yield from f(*args)
     else:
@@ -241,7 +245,7 @@ class PreprocessedStream(TokenStream):
         while True:
             try:
                 if not self._buf:
-                    self._buf.extend(self._preprocess(self.tokens.get(1)))
+                    self._buf.extend(self._preprocess(self.tokens.get(1, include_ws=True)))
 
                     if not self._buf:
                         continue
@@ -294,7 +298,7 @@ class PreprocessedStream(TokenStream):
                         self.tokens.expect(values=['\n'])
                     elif nxt.value == '\n':
                         break
-                    elif nxt.type != TokenType.UNKNOWN or nxt.value != ' ':
+                    elif True: #nxt.type != TokenType.UNKNOWN or nxt.value != ' ':
                         # Ignore spaces, but include tabs
                         tokens.append(nxt)
 
@@ -329,10 +333,8 @@ class PreprocessedStream(TokenStream):
                                         raise UnexpectedValue(['endif'], peek)
                                 else:
                                     return
-                            else:
-                                yield from self._preprocess(token)
-                        else:
-                            yield from self._preprocess(token)
+                        
+                        if is_defined: yield from self._preprocess(token)
 
                 macro = self.tokens.get(1, expect_type=[TokenType.IDENTIFIER])
                 is_defined = macro.value in self.defined
