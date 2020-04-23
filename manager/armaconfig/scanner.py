@@ -207,7 +207,7 @@ class Scanner:
                 yield self._make_token(TokenType.STRING, '"{}"'.format(self._get_string()))
             elif char == '<':
                 yield self._make_token(TokenType.ARROW_STRING, self._find_with_cb(lambda x: x != '>', advance=True))
-            elif not simple and char == '_' or char.isalpha():
+            elif not simple and self.is_identifier_char(char):
                 yield self._make_token(TokenType.IDENTIFIER, char + self._find_with_cb(self.is_identifier_char))
             else:
                 yield self._make_token(TokenType.UNKNOWN, char)

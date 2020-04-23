@@ -1,5 +1,5 @@
 
-import os, functools
+import os, re, functools
 from pathlib import Path
 from typing import Union
 
@@ -230,6 +230,9 @@ class PreprocessedStream(TokenStream):
         self._iterator = self.iter_preprocessed()
         self._buf = []
 
+    def __getattr__(self, attr):
+        return getattr(self.tokens, attr)
+
     def iter_preprocessed(self):
         while True:
             try:
@@ -301,7 +304,9 @@ class PreprocessedStream(TokenStream):
                 elif t != TokenType.ARROW_STRING:
                     raise UnexpectedType([TokenType.STRING, TokenType.ARROW_STRING], path_token)
 
-                self.tokens.add_scanner(self.path.joinpath(path))
+                path = re.sub(r'\\', '/', path)
+
+                self.tokens.add_scanner(self.path.parent.joinpath(path).resolve())
 
             elif command in ('ifdef', 'ifndef'):
                 def ifdef(is_defined, is_else=False):

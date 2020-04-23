@@ -22,7 +22,7 @@ class A3Class:
         self.body = body
         
         if inherits is not None:
-            pass
+            self.inherits = None
         else:
             self.inherits = None
 
