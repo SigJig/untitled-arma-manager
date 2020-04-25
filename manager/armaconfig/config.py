@@ -51,12 +51,14 @@ def decode(unit):
 
     def _clean_value(value):
         if isinstance(value, list):
-            return [_clean_value(x) for x in value if (isinstance(x, list) or not isinstance(x, str) or x.strip())]
+            return [_clean_value(x) for x in value if not isinstance(x, str) or x.strip()]
         else:
             value = value.strip()
 
-            if boolean := next((x for x in ('true', 'false') if x == value), None) is not None:
-                return boolean
+            try:
+                return bool(['false', 'true'].index(value))
+            except ValueError:
+                pass
 
             # TODO: Maybe move this to its own function, as it can be used in the preprocessor's include statement
             if value and value[0] == '"' and value[-1] == '"':
