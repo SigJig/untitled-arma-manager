@@ -37,11 +37,12 @@ def encode(node):
             yield ','
 
         yield '}'
+    elif isinstance(node, str):
+        yield '"%s"' % re.sub(r'\"', '""', node)
+    elif isinstance(node, bool):
+        yield str(int(node))
     else:
-        if isinstance(node, str):
-            yield '"%s"' % re.sub(r'\"', '""', node)
-        else:
-            yield str(node)
+        yield str(node)
 
 def decode(unit):
     parser = Parser(unit)
