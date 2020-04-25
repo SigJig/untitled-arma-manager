@@ -13,7 +13,10 @@ def encode(node):
             yield ':' + node.inherits.name
 
         yield '{'
-        yield from (encode(x) for x in node)
+
+        for x in node.values_raw():
+            yield from encode(x)
+
         yield '};'
     elif isinstance(node, ValueNode):
         yield node.name
@@ -28,10 +31,17 @@ def encode(node):
         yield ';'
     elif isinstance(node, (list, tuple)):
         yield '{'
-        yield from (encode(x) for x in node)
+
+        for x in node:
+            yield from encode(x)
+            yield ','
+
         yield '}'
     else:
-        yield re.sub(r'\"', '""', str(node))
+        if isinstance(node, str):
+            yield '"%s"' % re.sub(r'\"', '""', node)
+        else:
+            yield str(node)
 
 def decode(unit):
     parser = Parser(unit)
@@ -66,7 +76,7 @@ def decode(unit):
         for nodetype, nodeargs in iterator:
             if nodetype == NodeType.CLASS:
                 name, inherits, iter_ = nodeargs
-                config = Config(name, inherits)
+                config = Config(name, inherits, configs[-1])
 
                 configs[-1].add(config)
                 configs.append(config)
@@ -107,10 +117,61 @@ class Config(abc.MutableMapping, dict):
         }
     }
     """
-    def __init__(self, name, inherits=None):
+    def __init__(self, name, inherits=None, parent=None):
         self.name = name
-        self.inherits = inherits
+        self.parent = parent
+
+        if inherits:
+            try:
+                self.inherits = self.parent.get_config(inherits)
+            except KeyError:
+                raise ValueError('Attempted to inherit non-existing config (%s)' % inherits)
+        else:
+            self.inherits = None
+
         self._dict = OrderedDict()
+
+    def add(self, node):
+        if node.name in self:
+            raise ValueError('%s already defined' % node.name)
+
+        self[node.name] = node
+
+    def get_config(self, k):
+        try:
+            config = self[k]
+
+            if not isinstance(config, Config):
+                raise TypeError()
+
+            return config
+        except KeyError:
+            if self.parent:
+                return self.parent.get_config(k)
+
+            raise
+
+    def items_raw(self):
+        for key in self:
+            yield key, self._get_raw(key)
+
+    def values_raw(self):
+        for key in self:
+            yield self._get_raw(key)
+
+    def _get_raw(self, item):
+        item = self._keytransform(item)
+
+        try:
+            return self._dict[item]
+        except KeyError:
+            if self.inherits:
+                return self.inherits._get_raw(item)
+
+            raise
+
+    def _keytransform(self, key):
+        return key.lower()
 
     def __iter__(self):
         if self.inherits:
@@ -119,20 +180,12 @@ class Config(abc.MutableMapping, dict):
         yield from self._dict
 
     def __getitem__(self, item):
-        item = self._keytransform(item)
+        raw = self._get_raw(item)
 
-        try:
-            raw = self._dict[item]
-        except KeyError:
-            if self.inherits:
-                return self.inherits[item]
+        if isinstance(raw, ValueNode):
+            return raw.value
 
-            raise
-        else:
-            if isinstance(raw, ValueNode):
-                return raw.value
-
-            return raw
+        return raw
 
     def __setitem__(self, item, value):
         if not isinstance(value, (Config, ValueNode)):
@@ -145,12 +198,3 @@ class Config(abc.MutableMapping, dict):
 
     def __len__(self):
         return len(self._dict)
-
-    def _keytransform(self, key):
-        return key.lower()
-
-    def add(self, node):
-        if node.name in self:
-            raise ValueError('%s already defined' % node.name)
-
-        self[node.name] = node
