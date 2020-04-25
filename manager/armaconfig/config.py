@@ -1,24 +1,89 @@
 
 import re
-from collections import OrderedDict
-from .analyser import Parser
+from collections import OrderedDict, namedtuple, _OrderedDictItemsView, abc
+from .analyser import Parser, NodeType
 
-def to_dict(data):
-    dict_ = {}
+ValueNode = namedtuple('ValueNode', ['name', 'value'])
 
-    for i in data:
-        if hasattr(i, 'to_dict'):
-            dict_[i.name] = i.to_dict()
+def encode(node):
+    if isinstance(node, Config):
+        yield 'class %s' % node.name
+
+        if node.inherits:
+            yield ':' + node.inherits.name
+
+        yield '{'
+        yield from (encode(x) for x in node)
+        yield '};'
+    elif isinstance(node, ValueNode):
+        yield node.name
+
+        is_array = isinstance(node.value, (list, tuple))
+
+        if is_array:
+            yield '[]'
+
+        yield '='
+        yield from encode(node.value)
+        yield ';'
+    elif isinstance(node, (list, tuple)):
+        yield '{'
+        yield from (encode(x) for x in node)
+        yield '}'
+    else:
+        yield re.sub(r'\"', '""', str(node))
+
+def decode(unit):
+    parser = Parser(unit)
+    base_config = Config(unit.name)
+
+    configs = [base_config]
+
+    def _clean_value(value):
+        if isinstance(value, list):
+            return [_clean_value(x) for x in value if (isinstance(x, list) or not isinstance(x, str) or x.strip())]
         else:
-            dict_[i.name] = i.value
+            value = value.strip()
 
-    return dict_
+            if boolean := next((x for x in ('true', 'false') if x == value), None) is not None:
+                return boolean
 
-def encode(data):
-    for i in data:
-        yield from i.encode()
+            # TODO: Maybe move this to its own function, as it can be used in the preprocessor's include statement
+            if value and value[0] == '"' and value[-1] == '"':
+                value = value[1:len(value) - 1]
 
-class Config:
+            try:
+                new_val = float(value)
+
+                if new_val.is_integer():
+                    new_val = int(new_val)
+
+                return new_val
+            except ValueError:
+                return value
+
+    def _decode_iter(iterator):
+        for nodetype, nodeargs in iterator:
+            if nodetype == NodeType.CLASS:
+                name, inherits, iter_ = nodeargs
+                config = Config(name, inherits)
+
+                configs[-1].add(config)
+                configs.append(config)
+
+                _decode_iter(iter_)
+            elif nodetype == NodeType.PROPERTY:
+                name, value = nodeargs
+
+                configs[-1].add(ValueNode(name, _clean_value(value)))
+
+        configs.pop()
+
+    _decode_iter(parser.parse())
+
+    return base_config
+
+class Config(abc.MutableMapping, dict):
     """
     A `Config` object acts as a proxy to an ordered dict.
     The dict contains the keys and values that the config consists of.
@@ -42,124 +107,50 @@ class Config:
         }
     }
     """
-    def __init__(self, unit):
-        self.unit = unit
-        self.nodes = OrderedDict()
-
-        self._parser = Parser(unit)
-        self._is_completed = False
+    def __init__(self, name, inherits=None):
+        self.name = name
+        self.inherits = inherits
+        self._dict = OrderedDict()
 
     def __iter__(self):
-        return self
-
-    def __next__(self):
-        return
-
-    def __getattr__(self, attr):
-        return getattr(self.nodes, attr)
-
-
-class A3Class:
-    def __init__(self, name, inherits, body):
-        self.name = name
-        self.body = body
-        
-        if inherits is not None:
-            self.inherits = None
-        else:
-            self.inherits = None
-
-    def to_dict(self):
-        dict_ = to_dict(self.body)
-
         if self.inherits:
-            return {
-                **self.inherits.to_dict(),
-                **dict_
-            }
-
-        return dict_
+            yield from self.inherits
+        
+        yield from self._dict
 
     def __getitem__(self, item):
+        item = self._keytransform(item)
+
         try:
-            return next(x for x in self.body if x.name == item)
-        except StopIteration:
-            if not self.inherits:
-                raise KeyError(item)
+            raw = self._dict[item]
+        except KeyError:
+            if self.inherits:
+                return self.inherits[item]
 
-            return self.inherits.__getitem__(item)
-
-    def encode(self):
-        yield f'class {self.name}'
-
-        if self.inherits:
-            yield f': {self.inherits.name}'
-
-        yield '{'
-        yield from encode(self.body)
-
-        yield '};'
-
-    def __repr__(self):
-        if self.body:
-            body = ';'.join([str(x) for x in self.body]) + ';'
+            raise
         else:
-            body = ''
+            if isinstance(raw, ValueNode):
+                return raw.value
 
-        return f'<{type(self).__name__} -> {self.name} : {self.inherits} {{ {body} }}>'
+            return raw
 
-class A3Property:
-    def __init__(self, name, value):
-        self.name = name
-        self.value = self._process_value(value)
+    def __setitem__(self, item, value):
+        if not isinstance(value, (Config, ValueNode)):
+            value = ValueNode(item, value)
 
-    def __str__(self):
-        return str(self.value)
+        self._dict[self._keytransform(item)] = value
 
-    def encode_value(self, value):
-        if isinstance(value, list):
-            yield '{'
-            yield ','.join([y for x in value for y in self.encode_value(x)])
-            yield '}'
-        elif isinstance(value, str):
-            yield '"%s"' % re.sub(r'"', '""', value)
-        else:
-            yield str(value)
+    def __delitem__(self, item):
+        del self._dict[self._keytransform(item)]
 
-    def encode(self):
-        yield self.name
+    def __len__(self):
+        return len(self._dict)
 
-        if isinstance(self.value, list):
-            yield '[]'
+    def _keytransform(self, key):
+        return key.lower()
 
-        yield '='
-        yield from self.encode_value(self.value)
-        yield ';'
+    def add(self, node):
+        if node.name in self:
+            raise ValueError('%s already defined' % node.name)
 
-    def _process_value(self, value):
-        #value = [x.value if hasattr(x, 'value') else x for x in value]
-        #exit()
-
-        if isinstance(value, list):
-            return [self._process_value(x) for x in value if (isinstance(x, list) or not isinstance(x, str) or x.strip())]
-        else:
-            value = value.strip()
-
-            if boolean := next((x for x in ('true', 'false') if x == value), None) is not None:
-                return boolean
-
-            if value and value[0] == '"' and value[-1] == '"':
-                value = value[1:len(value) - 1]
-
-            try:
-                new_val = float(value)
-
-                if new_val.is_integer():
-                    new_val = int(new_val)
-
-                return new_val
-            except ValueError:
-                return value
-
-    def __repr__(self):
-        return f'<{type(self).__name__} -> {self.name} = {repr(self.value)}>'
+        self[node.name] = node

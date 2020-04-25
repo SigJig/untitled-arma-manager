@@ -1,13 +1,18 @@
 
 # TODO: Use trees instead of lists of tokens
 
-import os
+import os, enum, collections
 from pathlib import Path
 
 from .scanner import Scanner, Token, TokenType, TokenCollection
 from .exceptions import UnexpectedType, UnexpectedValue
-from .config import A3Class, A3Property
 from .stream import TokenStream, PreprocessedStream, only
+
+class NodeType(enum.Enum):
+    CLASS = 1
+    PROPERTY = 2
+
+Node = collections.namedtuple('Node', ['type', 'args'])
 
 class Parser:
     def __init__(self, unit):
@@ -66,17 +71,18 @@ class Parser:
 
                 if opener != '{': raise UnexpectedValue(expected=['{'], got=valuetoken)
 
-                body = []
-                token = only(self._stream.get(1))
-
-                while not (token.type == TokenType.UNKNOWN and token.value == '}'):
-                    body.append(next(self._parse_one(token)))
+                def _iter():
                     token = only(self._stream.get(1))
 
-                self._stream.expect(values=[';'])
+                    while not (token.type == TokenType.UNKNOWN and token.value == '}'):
+                        yield self._parse_one(token)
+                        token = only(self._stream.get(1))
 
-                yield A3Class(name, inherits, body)
+                    self._stream.expect(values=[';'])
+
+                return Node(NodeType.CLASS, (name, inherits, _iter()))
             else:
+                name = val
                 _, next_val = val_token = only(self._stream.expect(types=[TokenType.UNKNOWN]))
                 is_array = False
 
@@ -87,7 +93,9 @@ class Parser:
                 elif next_val != '=':
                     raise UnexpectedValue(expected='=', got=val_token)
 
-                yield A3Property(val, self._parse_array() if is_array else self._get_until(';')[0].value)
+                property_value = self._parse_array() if is_array else self._get_until(';')[0].value
+
+                return Node(NodeType.PROPERTY, (name, property_value))
         elif t == TokenType.UNKNOWN and val == ';':
             return self._parse_one()
         else:
@@ -96,6 +104,6 @@ class Parser:
     def parse(self):
         while True:
             try:
-                yield from self._parse_one()
+                yield self._parse_one()
             except RuntimeError:
                 return
