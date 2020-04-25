@@ -32,9 +32,15 @@ def encode(node):
     elif isinstance(node, (list, tuple)):
         yield '{'
 
+        is_first = True
+
         for x in node:
+            if not is_first:
+                yield ','
+
             yield from encode(x)
-            yield ','
+
+            is_first = False
 
         yield '}'
     elif isinstance(node, str):
