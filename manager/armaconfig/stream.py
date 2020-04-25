@@ -3,7 +3,7 @@ import os, re, functools
 from pathlib import Path
 from typing import Union
 
-from .scanner import Scanner, TokenType, Token, TokenCollection
+from .scanner import Scanner, TokenType, Token, TokenCollection, EOL
 from .exceptions import Unexpected, UnexpectedType, UnexpectedValue
 
 def only(arr):
@@ -140,7 +140,9 @@ class TokenStream:
         return p.resolve()
 
     def add_scanner(self, unit):
-        self._scanners.append(Scanner(unit))
+        scanner = Scanner(unit)
+
+        self._scanners.append(scanner)
 
         return self.scanner
 
@@ -203,10 +205,11 @@ class TokenStream:
     def _iter_from_scanner(self):
         while True:
             try:
-                yield from self.scanner.scan()
-            except (StopIteration, IndexError):
+                yield self.scanner.scan()
+            except EOL:
+                #raise
                 if len(self._scanners) <= 1:
-                    raise StopIteration
+                    raise
 
                 self._scanners.pop()
 
@@ -243,8 +246,8 @@ class PreprocessedStream(TokenStream):
                         continue
 
                 yield self._buf.pop(0)
-            except StopIteration:
-                return
+            except EOL:
+                raise StopIteration
 
     def _preprocess(self, token):
         if token.type == TokenType.PREPRO:

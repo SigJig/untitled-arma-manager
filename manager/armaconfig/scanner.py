@@ -1,6 +1,8 @@
 
 import os, enum, collections
 
+class EOL(IndexError): pass
+
 class TokenType(enum.Enum):
     UNKNOWN = 0
     STRING = 1
@@ -55,43 +57,78 @@ class TokenCollection(list):
 
 class Scanner:
     def __init__(self, unit):
+        self._lines_buf = [] # Cache for peeking
+
         if isinstance(unit, (str, os.PathLike)):
             self._unit = unit
-
-            with open(self._unit) as fp:
-                self._lines = fp.readlines()
+            self._stream = open(self._unit)
         else:
             self._stream = unit
             self._unit = self._stream.name
-            self._lines = self._stream.readlines()
 
         self._lineno = 0
         self._cursor = 0
 
+    def __del__(self):
+        if not self._stream.closed:
+            self._stream.close()
+
     @property
     def line(self):
         return self._get_line(self._lineno)
+
+    def _newline(self):
+        if self._lines_buf: self._lines_buf.pop(0)
+
+        self._lineno += 1
         
+        if not self._lines_buf:
+            self._add_lines(1)    
+
+    def _add_lines(self, idx):
+        # offset is index 0 in self._lines
+        # 
+        #   586          581                    3 ([581, 582, 583])
+        # lineno - self._line_buf_offset > len(self._lines)
+        #   586  -       581         = 5
+        # 
+        # for i from 0 to (5 - 3) + 1:
+        #   add line
+        #
+        # adds 3 lines (0, 1 ,2)
+        # adds 584, 585, 586
+        for _ in range(idx):
+            self._lines_buf.append(self._stream.readline())
+
+    # 584 - 583
+    # 1 >= 1
+    # 1 - 1 + 1
+    # 
     def _get_line(self, lineno):
-        try:
-            return self._lines[lineno]
-        except IndexError:
-            return ''
+        idx = lineno - self._lineno
+
+        if idx >= len(self._lines_buf):
+            self._add_lines((idx - len(self._lines_buf)) + 1)
+
+        line = self._lines_buf[idx]
+
+        #if line == '': raise EOL()
+
+        return line
 
     def _advance(self, length=1):
+        assert length >= 0, 'Can only advance forward (negative length given)'
+
         self._cursor += length
         
         line_length = len(self.line)
 
         if self._cursor >= line_length:
-            self._lineno += 1
+            self._newline()
             self._cursor = max(self._cursor - line_length, 0)
-        elif self._cursor < 0:
-            self._lineno = max(self._lineno - 1, 0)
-            self._cursor = max(len(self.line) - abs(self._cursor), 0)
 
-        if self._lineno >= len(self._lines):
-            raise StopIteration
+        #if self._lineno - self._line_buf_offset > len(self._lines):
+            #raise StopIteration
 
         return self
 
@@ -101,30 +138,30 @@ class Scanner:
         if self._cursor + length > line_length:
             remainder = self._cursor + length - line_length
             seq = ''
+            curline_idx = self._lineno
 
-            for i in range(self._lineno + 1, len(self._lines)):
-                line = self._get_line(i)
+            while True:
+                nxt_line = self._get_line(curline_idx + 1)
+                line_len = len(nxt_line)
 
-                if remainder >= len(line):
-                    seq += line
+                # If length is 0, meaning EOF, break and raise EOL
+                if not (line_len): break
+
+                if remainder >= line_len:
+                    seq += nxt_line
                 else:
-                    seq += line[:remainder]
-                    break
-            else:
-                #raise Unexpected(expected=[TokenType.UNKNOWN], got=TokenType.EOL)
-                raise StopIteration
+                    seq += nxt_line[:remainder]
+                    
+                    return self.line[self._cursor:] + seq
 
-            return self.line[self._cursor:] + seq
+            raise EOL()
 
         return self.line[self._cursor:self._cursor + length]
 
     def _get_raw(self, length=1):
         seq = self._peek(length)
 
-        try:
-            self._advance(length)
-        except StopIteration:
-            pass
+        self._advance(length)
 
         return seq
 
@@ -142,16 +179,20 @@ class Scanner:
 
     def _find_with_cb(self, callback, length=1, advance=False):
         seq = ''
+        getter = self._get_raw if advance else self._peek
+        is_peek = not advance
 
-        check = self._get_raw(length)
+        check = getter(length)
 
         while callback(check):
             seq += check
-            check = self._get_raw(length)
+            
+            if is_peek:
+                self._advance(1)
 
-        if not advance:
-            self._advance(-length)
+            check = getter(length)
 
+        #if advance: self._advance(1)
 
         return seq
 
@@ -161,7 +202,7 @@ class Scanner:
         """
         def callback(char):
             if char == '"':
-                if self._peek() != '"':
+                if self._peek(1) != '"':
                     return False
 
                 self._advance(1)
@@ -191,23 +232,26 @@ class Scanner:
         return Token(*args, **kwargs)
 
     def scan(self, simple=False):
-        for char in self._iter_chars():
-            if char == '/' and ((peek := self._peek()) in ['/', '*']):
-                if peek == '/':
-                    self._find_delim('\n', advance=True)
-                else:
-                    self._find_delim('*/', advance=True)
-            elif char == '#' and self._peek() == '#':
-                self._advance(1)
+        char = self._get_raw()
 
-                yield self._make_token(TokenType.DOUBLE_HASH, '')
-            elif char == '#' and not self.line[:self._cursor-1].strip():
-                yield self._make_token(TokenType.PREPRO, '')
-            elif char == '"':
-                yield self._make_token(TokenType.STRING, '"{}"'.format(self._get_string()))
-            elif char == '<':
-                yield self._make_token(TokenType.ARROW_STRING, self._find_with_cb(lambda x: x != '>', advance=True))
-            elif not simple and self.is_identifier_char(char):
-                yield self._make_token(TokenType.IDENTIFIER, char + self._find_with_cb(self.is_identifier_char))
+        if char == '/' and ((peek := self._peek()) in ['/', '*']):
+            if peek == '/':
+                self._find_delim('\n', advance=True)
             else:
-                yield self._make_token(TokenType.UNKNOWN, char)
+                self._find_delim('*/', advance=True)
+
+            return self.scan()
+        elif char == '#' and self._peek() == '#':
+            self._advance(1)
+
+            return self._make_token(TokenType.DOUBLE_HASH, '')
+        elif char == '#' and not self.line[:self._cursor-1].strip():
+            return self._make_token(TokenType.PREPRO, '')
+        elif char == '"':
+            return self._make_token(TokenType.STRING, '"{}"'.format(self._get_string()))
+        elif char == '<':
+            return self._make_token(TokenType.ARROW_STRING, self._find_with_cb(lambda x: x != '>', advance=True))
+        elif not simple and self.is_identifier_char(char):
+            return self._make_token(TokenType.IDENTIFIER, char + self._find_with_cb(self.is_identifier_char))
+        else:
+            return self._make_token(TokenType.UNKNOWN, char)
