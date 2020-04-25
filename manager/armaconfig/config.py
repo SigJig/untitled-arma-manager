@@ -1,5 +1,7 @@
 
 import re
+from collections import OrderedDict
+from .analyser import Parser
 
 def to_dict(data):
     dict_ = {}
@@ -15,6 +17,47 @@ def to_dict(data):
 def encode(data):
     for i in data:
         yield from i.encode()
+
+class Config:
+    """
+    A `Config` object acts as a proxy to an ordered dict.
+    The dict contains the keys and values that the config consists of.
+
+    It's purpose is to 
+
+    For example, consider the following Arma 3 Config class:
+
+    class MyClass {
+        string_value = "This is a string";
+        array_value[] = {"This", "is", "an", "array};
+    };
+
+    When the above is represented as a dictionary,
+    it would look something like this:
+
+    {
+        'MyClass': {
+            'string_value': 'This is a string',
+            'array_value': ['This', 'is', 'an', 'array']
+        }
+    }
+    """
+    def __init__(self, unit):
+        self.unit = unit
+        self.nodes = OrderedDict()
+
+        self._parser = Parser(unit)
+        self._is_completed = False
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        return
+
+    def __getattr__(self, attr):
+        return getattr(self.nodes, attr)
+
 
 class A3Class:
     def __init__(self, name, inherits, body):

@@ -6,7 +6,7 @@ from pathlib import Path
 
 from .scanner import Scanner, Token, TokenType, TokenCollection
 from .exceptions import UnexpectedType, UnexpectedValue
-from .configtypes import A3Class, A3Property
+from .config import A3Class, A3Property
 from .stream import TokenStream, PreprocessedStream, only
 
 class Parser:
