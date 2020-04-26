@@ -5,50 +5,84 @@ from .analyser import Parser, NodeType
 
 ValueNode = namedtuple('ValueNode', ['name', 'value'])
 
-def encode(node):
-    if isinstance(node, Config):
-        yield 'class %s' % node.name
+class Encoder:
+    def __init__(self, indent=None):
+        self._indent = indent
+        self._indent_lvl = 0
 
-        if node.inherits:
-            yield ':' + node.inherits.name
+    def _make_indent(self, pre=None, post=None):
+        if not self._indent: return
 
-        yield '{'
+        if pre is not None:
+            yield pre
 
+        yield (' ' * self._indent * self._indent_lvl)
+
+        if post is not None:
+            yield post
+
+    def _encode_one(self, node):
+        if isinstance(node, Config):
+            yield 'class %s' % node.name
+
+            if node.inherits:
+                yield ':' + node.inherits.name
+
+            yield '{'
+
+            self._indent_lvl += 1
+
+            for x in node.values_raw():
+                yield from self._make_indent(pre='\n')
+                yield from self._encode_one(x)
+
+            self._indent_lvl -= 1
+
+            yield from self._make_indent('\n', '};\n')
+        elif isinstance(node, ValueNode):
+            yield node.name
+
+            is_array = isinstance(node.value, (list, tuple))
+
+            if is_array:
+                yield '[]'
+
+            yield '='
+            yield from self._encode_one(node.value)
+            yield ';'
+        elif isinstance(node, (list, tuple)):
+            yield '{'
+
+            is_first = True
+            self._indent_lvl += 1
+
+            for x in node:
+                if not is_first:
+                    yield ','
+
+                yield from self._make_indent(pre='\n')
+                yield from self._encode_one(x)
+
+                is_first = False
+
+            self._indent_lvl -= 1
+
+            yield from self._make_indent('\n', '}')
+        elif isinstance(node, str):
+            yield '"%s"' % re.sub(r'\"', '""', node)
+        elif isinstance(node, bool):
+            yield str(int(node))
+        else:
+            yield str(node)
+
+    def encode(self, node):
         for x in node.values_raw():
-            yield from encode(x)
+            yield from self._encode_one(x)
 
-        yield '};'
-    elif isinstance(node, ValueNode):
-        yield node.name
+def encode(node, *args, **kwargs):
+    encoder = Encoder(*args, **kwargs)
 
-        is_array = isinstance(node.value, (list, tuple))
-
-        if is_array:
-            yield '[]'
-
-        yield '='
-        yield from encode(node.value)
-        yield ';'
-    elif isinstance(node, (list, tuple)):
-        yield '{'
-
-        is_first = True
-
-        for x in node:
-            if not is_first:
-                yield ','
-
-            yield from encode(x)
-
-            is_first = False
-
-        yield '}'
-    elif isinstance(node, str):
-        yield '"%s"' % re.sub(r'\"', '""', node)
-    elif isinstance(node, bool):
-        yield str(int(node))
-    else:
-        yield str(node)
+    return encoder.encode(node)
 
 def decode(unit):
     parser = Parser(unit)

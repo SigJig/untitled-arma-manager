@@ -70,8 +70,10 @@ class Scanner:
         self._cursor = 0
 
     def __del__(self):
-        if not self._stream.closed:
-            self._stream.close()
+        stream = getattr(self, '_stream', None)
+
+        if stream and not stream.closed:
+            stream.close()
 
     @property
     def line(self):
