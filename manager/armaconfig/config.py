@@ -38,7 +38,7 @@ class Encoder:
 
             self._indent_lvl -= 1
 
-            yield from self._make_indent('\n', '};\n')
+            yield from self._make_indent('\n', '};')
         elif isinstance(node, ValueNode):
             yield node.name
 
@@ -53,21 +53,23 @@ class Encoder:
         elif isinstance(node, (list, tuple)):
             yield '{'
 
-            is_first = True
-            self._indent_lvl += 1
+            if node:
+                is_first = True
+                self._indent_lvl += 1
 
-            for x in node:
-                if not is_first:
-                    yield ','
+                for x in node:
+                    if not is_first:
+                        yield ','
 
-                yield from self._make_indent(pre='\n')
-                yield from self._encode_one(x)
+                    yield from self._make_indent(pre='\n')
+                    yield from self._encode_one(x)
 
-                is_first = False
+                    is_first = False
 
-            self._indent_lvl -= 1
+                self._indent_lvl -= 1
 
-            yield from self._make_indent('\n', '}')
+                yield from self._make_indent('\n')
+            yield '}'
         elif isinstance(node, str):
             yield '"%s"' % re.sub(r'\"', '""', node)
         elif isinstance(node, bool):
@@ -75,14 +77,18 @@ class Encoder:
         else:
             yield str(node)
 
-    def encode(self, node):
-        for x in node.values_raw():
+    def encode(self, iterable):
+        for x in iterable:
             yield from self._encode_one(x)
 
 def encode(node, *args, **kwargs):
+    include_self = kwargs.pop('include_self', False)
     encoder = Encoder(*args, **kwargs)
 
-    return encoder.encode(node)
+    if include_self:
+        return encoder._encode_one(node)
+
+    return encoder.encode(node.values_raw())
 
 def decode(unit):
     parser = Parser(unit)
@@ -232,7 +238,16 @@ class Config(abc.MutableMapping, dict):
 
     def __setitem__(self, item, value):
         if not isinstance(value, (Config, ValueNode)):
-            value = ValueNode(item, value)
+            if isinstance(value, dict):
+                conf = Config(item, None, self)
+                self._dict[self._keytransform(item)] = conf
+
+                for k, v in value.items():
+                    conf[k] = v
+
+                return
+            else:
+                value = ValueNode(item, value)
 
         self._dict[self._keytransform(item)] = value
 
