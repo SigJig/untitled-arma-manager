@@ -26,9 +26,9 @@ class Encoder:
             yield 'class %s' % node.name
 
             if node.inherits:
-                yield ':' + node.inherits.name
+                yield ' : ' + node.inherits.name
 
-            yield '{'
+            yield ' {'
 
             self._indent_lvl += 1
 
@@ -38,7 +38,8 @@ class Encoder:
 
             self._indent_lvl -= 1
 
-            yield from self._make_indent('\n', '};')
+            yield from self._make_indent('\n')
+            yield '};'
         elif isinstance(node, ValueNode):
             yield node.name
 
@@ -47,7 +48,7 @@ class Encoder:
             if is_array:
                 yield '[]'
 
-            yield '='
+            yield ' = '
             yield from self._encode_one(node.value)
             yield ';'
         elif isinstance(node, (list, tuple)):
@@ -201,11 +202,11 @@ class Config(abc.MutableMapping, dict):
             raise
 
     def items_raw(self):
-        for key in self:
+        for key in self.iter_self():
             yield key, self._get_raw(key)
 
     def values_raw(self):
-        for key in self:
+        for key in self.iter_self():
             yield self._get_raw(key)
 
     def _get_raw(self, item):
@@ -222,11 +223,14 @@ class Config(abc.MutableMapping, dict):
     def _keytransform(self, key):
         return key.lower()
 
+    def iter_self(self):
+        return iter(self._dict)
+
     def __iter__(self):
         if self.inherits:
             yield from self.inherits
         
-        yield from self._dict
+        yield from self.iter_self()
 
     def __getitem__(self, item):
         raw = self._get_raw(item)
