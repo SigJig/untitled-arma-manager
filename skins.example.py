@@ -3,7 +3,7 @@ import os, re, json, shutil, functools
 from pathlib import Path
 from collections import namedtuple
 from dotenv import load_dotenv
-from manager.armaconfig.config import Config, decode, encode, Encoder
+from armaconfig import Config, decode, encode, Encoder
 
 load_dotenv()
 
@@ -159,7 +159,7 @@ class Entry:
             life_cfg_vehicles[classname]['textures'][name] = {
                 'name': self.manifest['displayName'],
                 'side': 'reb',
-                'skins': v['skin'],
+                'skins': skin,
                 'condition': in_gang_fnc
             }
 
