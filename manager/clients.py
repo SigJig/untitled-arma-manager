@@ -56,6 +56,7 @@ class SteamCMD(Service):
 
     def __init__(self, path: Path, login: list = []) -> SteamCMD:
         self.path = path
+        self.args = []
 
         if not isinstance(self.path, Path):
             self.path = Path(self.path)
@@ -65,8 +66,6 @@ class SteamCMD(Service):
         
         if login:
             self.login(*login) # pylint: disable=no-value-for-parameter
-
-        self.args = []
 
     def run(self):
         callable_ = self.subprocess_callable

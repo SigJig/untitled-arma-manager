@@ -71,4 +71,6 @@ class _Config:
     def set_json_file(self, file: Path):
         self.file = file
 
+        self._load()
+
 config = _Config()
