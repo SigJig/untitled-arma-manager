@@ -213,13 +213,10 @@ class ArmaClient(Service):
 
     @property
     def subprocess_callable(self) -> Sequence[str]:
-        try:
-            self.load_mods()
-        except:
-            pass
-        else:
-            if self._loaded_mods:
-                self.add_arg(['mod', ';'.join(self._loaded_mods) + ';'])
+        self.load_mods()
+
+        if self._loaded_mods:
+            self.add_arg(['mod', ';'.join(self._loaded_mods) + ';'])
 
         return [self.executable] + [
             self._format_arg(*x) if type(x) in [list, tuple] else self._format_arg(x) for x in self.cli_args

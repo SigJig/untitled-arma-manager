@@ -60,6 +60,7 @@ class Linker:
     def __init__(self, **opts) -> None:
         self.source = Path(opts.pop('source'))
         self.dest = opts.pop('dest')
+        self.symlink = opts.pop('symlink', True)
 
         if not isinstance(self.dest, (list, tuple)):
             self.dest = [self.dest]
@@ -78,7 +79,13 @@ class Linker:
             if not i.parent.exists():
                 os.makedirs(i.parent)
 
-            os.symlink(self.source, i)
+            if self.symlink:
+                os.symlink(self.source, i)
+            else:
+                if self.source.is_dir():
+                    shutil.copytree(self.source, i)
+                else:
+                    shutil.copyfile(self.source, i)
 
 class BuilderOptions:
     _default_output = {
@@ -321,7 +328,13 @@ class Builder:
             shutil.copytree(self.opts.tmp_dir, self.next_mission)
 
         if links := self.opts.output['links']:
-            linker = Linker(source=self.current_mission, dest=links)
+            if isinstance(links, list):
+                links = {
+                    'dest': links
+                }
+
+            links['source'] = self.current_mission
+            linker = Linker(**links)
             linker.run()
 
         self._del_tmp()
