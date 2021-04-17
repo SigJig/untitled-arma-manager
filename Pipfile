@@ -9,8 +9,8 @@ pylint = "*"
 [packages]
 requests = "*"
 python-dotenv = "*"
-pboutil = {editable = true,git = "https://gitlab.com/SigJig/pboutil.git"}
 armaconfig-py = {editable = true,git = "https://github.com/SigJig/armaconfig.py.git"}
+pboutil = {editable = true,git = "https://gitlab.com/SigJig/pboutil.git",ref = "file-context-manager"}
 
 [requires]
 python_version = "3.8"
